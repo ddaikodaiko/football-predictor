@@ -1,0 +1,73 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:      #131722;
+  --bg2:     #1a2030;
+  --bg3:     #1f2738;
+  --bg4:     #252e42;
+  --bg5:     #2b3650;
+  --border:  rgba(255,255,255,.07);
+  --border2: rgba(255,255,255,.14);
+  --text:    #ffffff;
+  --text2:   #8d95b0;
+  --text3:   #4e5676;
+  --green:   #00c96b;
+  --green2:  #00a657;
+  --green3:  #007a40;
+  --amber:   #f5a623;
+  --amber2:  #e09000;
+  --red:     #e84545;
+  --blue:    #3b9eff;
+  --purple:  #9b72f0;
+  --cyan:    #22d3ee;
+  --home:    #3b9eff;
+  --away:    #f5a623;
+  --accent:  #00c96b;
+  --accent2: #00a657;
+  --radius:    6px;
+  --radius-sm: 4px;
+  --radius-xs: 2px;
+  --font: 'Inter', system-ui, -apple-system, sans-serif;
+  --shadow:    0 2px 12px rgba(0,0,0,.6);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,.75);
+}
+
+html, body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 1.5;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--bg4); border-radius: 2px; }
+
+a { color: var(--green); text-decoration: none; }
+button { cursor: pointer; font-family: inherit; }
+select, input { font-family: inherit; }
+
+.card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.tag {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 7px; border-radius: 3px;
+  font-size: 9px; font-weight: 800;
+  letter-spacing: 0.06em; text-transform: uppercase;
+}
+.tag-green  { background: rgba(0,201,107,.12);  color: var(--green);  border: 1px solid rgba(0,201,107,.25); }
+.tag-yellow { background: rgba(245,166,35,.12); color: var(--amber);  border: 1px solid rgba(245,166,35,.25); }
+.tag-red    { background: rgba(232,69,69,.12);  color: var(--red);    border: 1px solid rgba(232,69,69,.25); }
+.tag-blue   { background: rgba(59,158,255,.12); color: var(--blue);   border: 1px solid rgba(59,158,255,.25); }
+.tag-purple { background: rgba(155,114,240,.12);color: var(--purple); border: 1px solid rgba(155,114,240,.25); }
+.tag-gray   { background: var(--bg4); color: var(--text2); border: 1px solid var(--border2); }
+.tag-accent { background: rgba(0,201,107,.1); color: var(--green); border: 1px solid rgba(0,201,107,.2); }
