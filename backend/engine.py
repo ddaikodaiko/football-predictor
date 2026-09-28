@@ -21,9 +21,9 @@ from ratings import DixonColes, markets, outcome_probs, score_matrix
 from simulate import (GOAL_INTENSITY, ZONES, ZONE_LABELS, DEFAULT_ZONES, betting_backtest, simulate_season,
                       simulate_timeline, standings)
 
-MODEL_VERSION = "dc-xg0.5-xi0.003-joint"
+MODEL_VERSION = "dc-xg0.5-xi0.003-joint-xgscaled"
 XG_WEIGHT = 0.5
-BACKTEST_FILE = "dc_xg0.5_xi0.003_joint.csv.gz"
+BACKTEST_FILE = "dc_joint_rescaled.csv.gz"
 FLAGS = {"E": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "SP": "🇪🇸", "D": "🇩🇪", "I": "🇮🇹", "F": "🇫🇷", "N": "🇳🇱", "P": "🇵🇹"}
 
 

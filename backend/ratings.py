@@ -37,6 +37,15 @@ class DixonColes:
     xg_weight: float = 0.0       # 0 = goals only, 1 = xG only
     prior_sd: float = 1.0        # ridge prior on attack/defense (log scale; best of 0.5-2)
     max_days: int = 3 * 365      # ignore matches older than this
+    # Understat's xG drifts: 1.03 goals per xG in 2014/15, 0.90 in 2026/27. Mixed raw, it
+    # drags the expected goals with it. Rescaled so that, on the training data itself
+    # (same time weights, so only the past), xG adds up to the goals actually scored.
+    xg_rescale: bool = True
+    # Extra home advantage for the most recent `home_recent_days` (0 = off), shrunk towards
+    # zero by `home_recent_sd`. Lets the fit notice a change like the empty stadiums of
+    # 2020/21 faster than the three-year window does.
+    home_recent_days: int = 0
+    home_recent_sd: float = 0.1
 
     teams: list[str] = field(default_factory=list)
     mu: float = 0.0
@@ -47,16 +56,23 @@ class DixonColes:
     as_of: pd.Timestamp | None = None
     n_matches: int = 0
     division_offsets: dict[str, tuple[float, float]] = field(default_factory=dict)
+    xg_scale: float = 1.0
+    home_recent: float = 0.0
 
     # ── fitting ────────────────────────────────────────────────────────────────
 
     def fit(self, matches: pd.DataFrame, as_of: pd.Timestamp | None = None,
-            primary: str | None = None) -> "DixonColes":
+            primary: str | None = None, prior: "DixonColes | None" = None) -> "DixonColes":
         """`matches`: date, home, away, fthg, ftag and optionally xg_home/xg_away.
         Only matches strictly before `as_of` are used (default: all).
 
         With `primary` and a `league` column holding more than one division, `mu` and
-        `home_adv` are those of `primary`, and the other divisions get offsets."""
+        `home_adv` are those of `primary`, and the other divisions get offsets.
+
+        With `prior` (a model fitted on a longer window), each team is shrunk towards its
+        own long-run rating instead of towards an average team. Measured: with the plain
+        prior, big clubs are under-rated by ~0.17 points a match and weak ones over-rated
+        by as much, over 18k matches, because they don't regress to the mean."""
         df = matches.dropna(subset=["fthg", "ftag"])
         if "disputed" in df:
             df = df[df["disputed"].fillna(0) == 0]      # results the sources disagree on
@@ -80,11 +96,24 @@ class DixonColes:
             xa = pd.to_numeric(df["xg_away"], errors="coerce").to_numpy(float)
             has = ~np.isnan(xh) & ~np.isnan(xa)
             w = self.xg_weight
+            if self.xg_rescale and has.any():
+                tw = np.exp(-self.xi * days)[has]
+                scale = (tw * (gh[has] + ga[has])).sum() / (tw * (xh[has] + xa[has])).sum()
+                xh, xa = xh * scale, xa * scale
+                self.xg_scale = float(scale)
             th = np.where(has, w * xh + (1 - w) * gh, gh)
             ta = np.where(has, w * xa + (1 - w) * ga, ga)
         weight = np.exp(-self.xi * days)
         n = len(self.teams)
         inv_var = 1.0 / self.prior_sd ** 2
+        att0, dfn0 = np.zeros(n), np.zeros(n)
+        if prior is not None:
+            # The long model's ratings live around its own mean; centre them so an average
+            # club still pulls towards 0 here.
+            pr = dict(zip(prior.teams, prior.attack - prior.attack.mean()))
+            pd_ = dict(zip(prior.teams, prior.defense - prior.defense.mean()))
+            att0 = np.array([pr.get(t, 0.0) for t in self.teams])
+            dfn0 = np.array([pd_.get(t, 0.0) for t in self.teams])
 
         # Division offsets: group 0 is the primary division (offset fixed at 0).
         others: list[str] = []
@@ -94,39 +123,47 @@ class DixonColes:
             gi = df["league"].map({primary: 0, **{g: k + 1 for k, g in enumerate(others)}}).to_numpy()
         n_off = len(others)
         o = 2 + 2 * n                                   # offsets start here: mu_off, then home_off
+        recent = (days <= self.home_recent_days).astype(float) if self.home_recent_days else np.zeros(len(df))
+        r_idx = o + 2 * n_off                           # recent home term, last parameter
+        inv_var_recent = 1.0 / self.home_recent_sd ** 2
 
         def nll(theta: np.ndarray) -> tuple[float, np.ndarray]:
             mu, home, att, dfn = theta[0], theta[1], theta[2:2 + n], theta[2 + n:o]
             mu_g = np.concatenate([[0.0], theta[o:o + n_off]])[gi]
-            home_g = np.concatenate([[0.0], theta[o + n_off:]])[gi]
-            lh = np.exp(mu + mu_g + home + home_g + att[hi] + dfn[ai])
+            home_g = np.concatenate([[0.0], theta[o + n_off:r_idx]])[gi]
+            lh = np.exp(mu + mu_g + home + home_g + theta[r_idx] * recent + att[hi] + dfn[ai])
             la = np.exp(mu + mu_g + att[ai] + dfn[hi])
             rh, ra = weight * (th - lh), weight * (ta - la)       # d ll / d log λ
             ll = np.sum(weight * (th * np.log(lh) - lh + ta * np.log(la) - la))
-            penalty = 0.5 * inv_var * (att @ att + dfn @ dfn)
+            da, dd = att - att0, dfn - dfn0
+            penalty = 0.5 * inv_var * (da @ da + dd @ dd) + 0.5 * inv_var_recent * theta[r_idx] ** 2
             grad = np.empty_like(theta)
             grad[0] = rh.sum() + ra.sum()
             grad[1] = rh.sum()
-            grad[2:2 + n] = np.bincount(hi, rh, n) + np.bincount(ai, ra, n) - inv_var * att
-            grad[2 + n:o] = np.bincount(ai, rh, n) + np.bincount(hi, ra, n) - inv_var * dfn
+            grad[2:2 + n] = np.bincount(hi, rh, n) + np.bincount(ai, ra, n) - inv_var * da
+            grad[2 + n:o] = np.bincount(ai, rh, n) + np.bincount(hi, ra, n) - inv_var * dd
             if n_off:
                 grad[o:o + n_off] = np.bincount(gi, rh + ra, n_off + 1)[1:]
-                grad[o + n_off:] = np.bincount(gi, rh, n_off + 1)[1:]
+                grad[o + n_off:r_idx] = np.bincount(gi, rh, n_off + 1)[1:]
+            grad[r_idx] = (rh * recent).sum() - inv_var_recent * theta[r_idx]
             return -(ll - penalty), -grad
 
-        theta0 = np.zeros(o + 2 * n_off)
+        theta0 = np.zeros(r_idx + 1)
         theta0[0] = np.log(max((th.mean() + ta.mean()) / 2, 0.1))
         theta0[1] = 0.25
         result = minimize(nll, theta0, jac=True, method="L-BFGS-B")
-        self.mu, self.home_adv = float(result.x[0]), float(result.x[1])
+        self.home_recent = float(result.x[r_idx])
+        # Predictions are for the present, so the recent home advantage is part of it.
+        self.mu, self.home_adv = float(result.x[0]), float(result.x[1]) + self.home_recent
         self.attack, self.defense = result.x[2:2 + n], result.x[2 + n:o]
         self.division_offsets = {g: (float(result.x[o + k]), float(result.x[o + n_off + k]))
                                  for k, g in enumerate(others)}
 
         # ρ only makes sense on real scorelines, so it's fitted on goals, not on xG.
         mu_g = np.concatenate([[0.0], result.x[o:o + n_off]])[gi]
-        home_g = np.concatenate([[0.0], result.x[o + n_off:]])[gi]
-        lh = np.exp(self.mu + mu_g + self.home_adv + home_g + self.attack[hi] + self.defense[ai])
+        home_g = np.concatenate([[0.0], result.x[o + n_off:r_idx]])[gi]
+        lh = np.exp(self.mu + mu_g + result.x[1] + self.home_recent * recent + home_g
+                    + self.attack[hi] + self.defense[ai])
         la = np.exp(self.mu + mu_g + self.attack[ai] + self.defense[hi])
 
         def rho_nll(rho: float) -> float:

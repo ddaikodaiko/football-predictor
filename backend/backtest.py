@@ -78,7 +78,7 @@ COMPANION = {"E0": "E1", "SP1": "SP2", "D1": "D2", "I1": "I2", "F1": "F2"}
 
 
 def walk_forward(matches: pd.DataFrame, league: str, seasons: list[str], xg_weight: float,
-                 refit_days: int = 7, joint: bool = False, **dc_kwargs) -> pd.DataFrame:
+                 refit_days: int = 7, joint: bool = False, long_prior: bool = False, **dc_kwargs) -> pd.DataFrame:
     """Predict every match of `seasons` with a model fitted on the past only."""
     lg = matches[matches["league"] == league].sort_values("date")
     fit_on = lg
@@ -96,7 +96,11 @@ def walk_forward(matches: pd.DataFrame, league: str, seasons: list[str], xg_weig
         week = target[(target["date"] >= cut) & (target["date"] < nxt)]
         if not week.empty:
             try:
-                dc = DixonColes(xg_weight=xg_weight, **dc_kwargs).fit(fit_on, as_of=cut, primary=league)
+                prior = None
+                if long_prior:
+                    # Long-run club strength: 8 years, slow decay, goals only (xG starts in 2014).
+                    prior = DixonColes(xi=0.0005, max_days=8 * 365, prior_sd=1.0).fit(fit_on, as_of=cut, primary=league)
+                dc = DixonColes(xg_weight=xg_weight, **dc_kwargs).fit(fit_on, as_of=cut, primary=league, prior=prior)
             except ValueError:
                 cut = nxt
                 continue
@@ -151,6 +155,8 @@ def main() -> int:
     parser.add_argument("--max-days", type=int, default=3 * 365)
     parser.add_argument("--joint", action="store_true", help="fit each first division with its second")
     parser.add_argument("--name", default=None, help="output file name (default: from the parameters)")
+    parser.add_argument("--home-recent", type=int, default=0, help="days of extra recent home advantage")
+    parser.add_argument("--long-prior", action="store_true", help="shrink towards each club's long-run rating")
     args = parser.parse_args()
 
     conn = store.connect()
@@ -169,8 +175,9 @@ def main() -> int:
             name += "_joint"
         name = args.name or name
         t0 = time.time()
-        pred = pd.concat([walk_forward(matches, lg, seasons, w, joint=args.joint, xi=args.xi,
-                                       prior_sd=args.prior, max_days=args.max_days)
+        pred = pd.concat([walk_forward(matches, lg, seasons, w, joint=args.joint, long_prior=args.long_prior, xi=args.xi,
+                                       prior_sd=args.prior, max_days=args.max_days,
+                                       home_recent_days=args.home_recent)
                           for lg in leagues], ignore_index=True)
         pred.to_csv(OUT_DIR / f"{name}.csv.gz", index=False)
         table = report(pred)

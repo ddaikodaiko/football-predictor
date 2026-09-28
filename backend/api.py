@@ -161,7 +161,8 @@ def value_clv():
 
 @app.get("/api/live")
 def live_matches():
-    return live.live_matches()
+    e = _engine()
+    return live.live_matches({code: e.teams(code) for code in live.COMP_TO_LEAGUE.values()})
 
 
 @app.post("/api/reload")
