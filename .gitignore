@@ -10,3 +10,7 @@ dist/
 *.db
 *.pkl
 *.log
+
+# Datos descargados y resultados del backtest: se regeneran con ingest.py / backtest.py
+data/
+.pytest_cache/
