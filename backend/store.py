@@ -91,7 +91,8 @@ CREATE TABLE IF NOT EXISTS ingest_log (
 def connect(path: Path | None = None) -> sqlite3.Connection:
     path = Path(path or DB_PATH)
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
+    # The API reads from worker threads; writes are serialised by the caller (engine.py).
+    conn = sqlite3.connect(path, check_same_thread=False)
     conn.executescript(SCHEMA)
     return conn
 
@@ -137,9 +138,15 @@ def summary(conn: sqlite3.Connection) -> pd.DataFrame:
     )
 
 
-def load_fixtures(conn: sqlite3.Connection, league: str, season: str) -> pd.DataFrame:
-    df = pd.read_sql_query(
-        "SELECT * FROM fixtures WHERE league = ? AND season = ? ORDER BY date", conn, params=[league, season])
+def load_fixtures(conn: sqlite3.Connection, league: str | None = None, season: str | None = None) -> pd.DataFrame:
+    query, params = "SELECT * FROM fixtures WHERE 1=1", []
+    if league:
+        query += " AND league = ?"
+        params.append(league)
+    if season:
+        query += " AND season = ?"
+        params.append(season)
+    df = pd.read_sql_query(query + " ORDER BY date", conn, params=params)
     df["date"] = pd.to_datetime(df["date"])
     return df
 
