@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { base } from '$app/paths';
   import { goto } from '$app/navigation';
   import FormPills from '$lib/components/FormPills.svelte';
   import LineChart from '$lib/components/LineChart.svelte';
@@ -200,7 +201,7 @@
     {/if}
 
     <p class="note foot">Modelo {p.model}, ajustado con {p.fitted_on.toLocaleString('es')} partidos de {leagueInfo?.name}.
-      Qué tal acierta: <a href="/modelo">El modelo</a>.</p>
+      Qué tal acierta: <a href="{base}/modelo">El modelo</a>.</p>
   {/if}
 </div>
 

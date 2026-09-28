@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { base } from '$app/paths';
   import ProbBar from '$lib/components/ProbBar.svelte';
   import { matchHref } from '$lib/api';
   import { pct, shortDate } from '$lib/format';
@@ -49,7 +50,7 @@
 
   {#each groups as g}
     <section class="card league">
-      <h2><a href="/liga/{g.code}">{byCode[g.code]?.flag} {byCode[g.code]?.name}</a> <small>ver liga →</small></h2>
+      <h2><a href="{base}/liga/{g.code}">{byCode[g.code]?.flag} {byCode[g.code]?.name}</a> <small>ver liga →</small></h2>
       <div class="rows">
         {#each g.matches as m}
           <a class="row" href={matchHref(g.code, m.home, m.away)}>

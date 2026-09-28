@@ -1,19 +1,22 @@
 <script lang="ts">
+  import { base } from '$app/paths';
   import '../app.css';
   import favicon from '$lib/assets/favicon.svg';
   import { page } from '$app/state';
+  import { STATIC } from '$lib/api';
 
   let { children } = $props();
 
+  // Valor and Directo need the live server (odds and scores): not in the static demo.
   const links = [
     { href: '/', label: 'Partidos' },
     { href: '/liga/SP1', label: 'Ligas', match: '/liga' },
-    { href: '/valor', label: 'Valor' },
+    { href: '/valor', label: 'Valor', live: true },
     { href: '/modelo', label: 'El modelo' },
-    { href: '/directo', label: 'Directo' },
-  ];
-  const active = (l: (typeof links)[number]) =>
-    l.match ? page.url.pathname.startsWith(l.match) : page.url.pathname === l.href;
+    { href: '/directo', label: 'Directo', live: true },
+  ].filter((l) => !(STATIC && l.live));
+  const path = $derived(page.url.pathname.slice(base.length) || '/');
+  const active = (l: (typeof links)[number]) => (l.match ? path.startsWith(l.match) : path === l.href);
 </script>
 
 <svelte:head>
@@ -23,10 +26,10 @@
 
 <header>
   <nav>
-    <a href="/" class="brand">⚽ <span>Football Predictor</span></a>
+    <a href="{base}/" class="brand">⚽ <span>Football Predictor</span></a>
     <div class="links">
       {#each links as l}
-        <a href={l.href} class:on={active(l)}>{l.label}</a>
+        <a href="{base}{l.href}" class:on={active(l)}>{l.label}</a>
       {/each}
     </div>
   </nav>
@@ -36,7 +39,7 @@
 
 <footer>
   Datos: football-data.co.uk y Understat. Modelo Dixon-Coles con xG, medido contra el mercado en
-  <a href="/modelo">El modelo</a>. No es consejo de apuestas: el modelo no le gana a las casas.
+  <a href="{base}/modelo">El modelo</a>. No es consejo de apuestas: el modelo no le gana a las casas.
 </footer>
 
 <style>

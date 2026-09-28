@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { base } from '$app/paths';
   import { goto } from '$app/navigation';
   import FormPills from '$lib/components/FormPills.svelte';
   import ProbBar from '$lib/components/ProbBar.svelte';
@@ -35,7 +36,7 @@
       <p>Temporada {seasonLabel(data.league.season)} · {data.league.played} partidos jugados
         {#if data.league.has_xg}· con xG{/if}</p>
     </div>
-    <select value={data.league.code} onchange={(e) => goto(`/liga/${e.currentTarget.value}`)} aria-label="Cambiar de liga">
+    <select value={data.league.code} onchange={(e) => goto(`${base}/liga/${e.currentTarget.value}`)} aria-label="Cambiar de liga">
       <optgroup label="Primera división">
         {#each tier1 as l}<option value={l.code}>{l.flag} {l.name}</option>{/each}
       </optgroup>

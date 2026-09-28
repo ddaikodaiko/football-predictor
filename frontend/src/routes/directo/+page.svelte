@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { base } from '$app/paths';
   import { onDestroy, onMount } from 'svelte';
   import ProbBar from '$lib/components/ProbBar.svelte';
   import { api, matchHref, type Inplay, type LiveMatch } from '$lib/api';
@@ -44,7 +45,7 @@
     <p class="empty">Falta <code>FOOTBALL_DATA_KEY</code> en <code>backend/.env</code> (clave gratuita de football-data.org).</p>
   {:else if !matches.length}
     <p class="empty">Hoy no hay partidos de las cinco grandes ligas. Mientras tanto, prueba la calculadora en directo de cualquier
-      <a href="/">partido</a>.</p>
+      <a href="{base}/">partido</a>.</p>
   {:else}
     <div class="grid grid-2">
       {#each matches as m (m.id)}

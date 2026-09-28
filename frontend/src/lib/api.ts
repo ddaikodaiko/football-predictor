@@ -1,6 +1,10 @@
 import { env } from '$env/dynamic/public';
+import { base } from '$app/paths';
+import * as dcm from './dixoncoles';
 
 const BASE = env.PUBLIC_API_URL ?? 'http://localhost:8000';
+/** Serverless demo: data from static JSON (backend/export_static.py), maths in the browser. */
+export const STATIC = env.PUBLIC_STATIC === '1';
 
 type Fetch = typeof fetch;
 
@@ -111,7 +115,49 @@ async function post<T>(f: Fetch, path: string, body: unknown): Promise<T> {
   return r.json();
 }
 
-export const api = {
+// ── static mode ──────────────────────────────────────────────────────────────
+
+type Bundle = {
+  code: string; teams: string[]; rho: number; fitted_on: number; known: Record<string, boolean>;
+  ratings: Record<string, NonNullable<SideRating>>; pairs: Record<string, [number, number]>;
+  form: Record<string, FormGame[]>; h2h: Record<string, Prediction['h2h']>;
+};
+const bundles = new Map<string, Promise<Bundle>>();
+
+async function file<T>(f: Fetch, path: string): Promise<T> {
+  const r = await f(`${base}/data/${path}`);
+  if (!r.ok) throw new Error(`Sin datos (${path})`);
+  return r.json();
+}
+
+function bundle(league: string, f: Fetch = fetch): Promise<Bundle> {
+  if (!bundles.has(league)) bundles.set(league, file<Bundle>(f, `${league}/bundle.json`));
+  return bundles.get(league)!;
+}
+
+async function pairing(league: string, home: string, away: string, f: Fetch = fetch) {
+  const b = await bundle(league, f);
+  const pair = b.pairs[`${home}|${away}`];
+  if (!pair) throw new Error(`${home} y ${away} no juegan juntos en ${league} esta temporada`);
+  return { b, lh: pair[0], la: pair[1] };
+}
+
+async function staticPredict(league: string, home: string, away: string, f: Fetch): Promise<Prediction> {
+  const { b, lh, la } = await pairing(league, home, away, f);
+  const m = dcm.scoreMatrix(lh, la, b.rho);
+  const key = home < away ? `${home}|${away}` : `${away}|${home}`;
+  return {
+    league, home, away, model: 'dc-xg0.5-xi0.003-joint', fitted_on: b.fitted_on,
+    known: { home: b.known[home] ?? false, away: b.known[away] ?? false },
+    lambda_home: lh, lambda_away: la, ...dcm.markets(m),
+    score_matrix: m.slice(0, 6).map((row) => row.slice(0, 6)),
+    ratings: { home: b.ratings[home] ?? null, away: b.ratings[away] ?? null },
+    form: { home: b.form[home] ?? [], away: b.form[away] ?? [] },
+    h2h: b.h2h[key] ?? [],
+  };
+}
+
+const live = {
   leagues: (f: Fetch = fetch) => get<League[]>(f, '/api/leagues'),
   table: (code: string, f: Fetch = fetch) => get<TableRow[]>(f, `/api/leagues/${code}/table`),
   ratings: (code: string, f: Fetch = fetch) => get<Rating[]>(f, `/api/leagues/${code}/ratings`),
@@ -125,12 +171,38 @@ export const api = {
   timeline: (league: string, home: string, away: string, seed?: number) =>
     post<Timeline>(fetch, '/api/simulate/match', { league, home, away, seed }),
   backtest: (f: Fetch = fetch) => get<Backtest>(f, '/api/backtest'),
+};
+
+const offline: typeof live = {
+  leagues: (f = fetch) => file<League[]>(f, 'leagues.json'),
+  table: (code, f = fetch) => file<TableRow[]>(f, `${code}/table.json`),
+  ratings: (code, f = fetch) => file<Rating[]>(f, `${code}/ratings.json`),
+  teams: async (code, f = fetch) => (await bundle(code, f)).teams,
+  fixtures: async (code, limit = 10, f = fetch) => (await file<Fixture[]>(f, `${code}/fixtures.json`)).slice(0, limit),
+  forecast: (code, f = fetch) => file<Forecast>(f, `${code}/forecast.json`),
+  predict: (league, home, away, f = fetch) => staticPredict(league, home, away, f),
+  inplay: async (league, home, away, sh, sa, minute) => {
+    const { b, lh, la } = await pairing(league, home, away);
+    return dcm.inplay(lh, la, b.rho, sh, sa, minute);
+  },
+  timeline: async (league, home, away, seed) => {
+    const { b, lh, la } = await pairing(league, home, away);
+    return { home, away, ...dcm.timeline(lh, la, b.rho, seed) };
+  },
+  backtest: (f = fetch) => file<Backtest>(f, 'backtest.json'),
+};
+
+const core = STATIC ? offline : live;
+
+export const api = {
+  ...core,
   value: (minEv = 0.02, f: Fetch = fetch) =>
     get<{ picks: ValuePick[]; snapshot: string | null; credits_left: number | null }>(f, `/api/value?min_ev=${minEv}`),
   clv: (f: Fetch = fetch) => get<Clv>(f, '/api/value/clv'),
   oddsHistory: (league: string, home: string, away: string, f: Fetch = fetch) =>
-    get<{ points: OddsPoint[]; kickoff: string | null }>(
-      f, `/api/odds/history?${new URLSearchParams({ league, home, away })}`),
+    STATIC ? Promise.resolve({ points: [] as OddsPoint[], kickoff: null })
+      : get<{ points: OddsPoint[]; kickoff: string | null }>(
+        f, `/api/odds/history?${new URLSearchParams({ league, home, away })}`),
   live: (f: Fetch = fetch) => get<{ matches: LiveMatch[]; source?: string }>(f, '/api/live'),
 };
 
@@ -138,5 +210,5 @@ export const BIG_FIVE = ['E0', 'SP1', 'D1', 'I1', 'F1'];
 
 export function matchHref(league: string, home: string, away: string): string {
   const q = new URLSearchParams({ liga: league, local: home, visitante: away });
-  return `/partido?${q}`;
+  return `${base}/partido?${q}`;
 }

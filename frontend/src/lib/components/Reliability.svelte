@@ -4,7 +4,7 @@
   let { points }: { points: { bin: string; n: number; predicted: number; observed: number }[] } = $props();
 
   const S = 300;
-  const pad = 36;
+  const pad = 48;
   const inner = S - pad * 2;
   const x = (p: number) => pad + p * inner;
   const y = (p: number) => S - pad - p * inner;
@@ -25,7 +25,7 @@
     </circle>
   {/each}
   <text x={S / 2} y={S - 4} text-anchor="middle" class="axis">Lo que dijo el modelo</text>
-  <text x={10} y={S / 2} text-anchor="middle" class="axis" transform="rotate(-90 10 {S / 2})">Lo que pasó</text>
+  <text x={9} y={S / 2} text-anchor="middle" class="axis" transform="rotate(-90 9 {S / 2})">Lo que pasó</text>
 </svg>
 
 <style>

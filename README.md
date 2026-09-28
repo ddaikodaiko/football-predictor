@@ -11,6 +11,12 @@ temporadas completas y un backtest honesto contra las casas de apuestas.
 - **Simuladores**: la temporada que queda (10.000 veces en medio segundo), un partido minuto
   a minuto y las probabilidades en directo según el marcador.
 
+| Partido | Pronóstico de temporada |
+|---|---|
+| ![Partido](docs/media/partido.jpg) | ![Liga](docs/media/liga.jpg) |
+| **Próxima jornada** | **El modelo, medido** |
+| ![Partidos](docs/media/partidos.jpg) | ![Modelo](docs/media/modelo.jpg) |
+
 ## Resultados
 
 Walk-forward 2016/17 – 2025/26, cinco grandes ligas, 17.937 partidos. Log loss, menos es mejor:
@@ -98,5 +104,20 @@ Tests: `cd backend && ../.venv/bin/python -m pytest -q` (34 tests, sin red).
 | POST | `/api/simulate/match` | un partido simulado minuto a minuto |
 | GET | `/api/backtest` | resumen del backtest |
 | GET | `/api/live` | partidos de hoy (football-data.org) |
+
+## Demo estática (sin servidor)
+
+La web también se compila como sitio estático para GitHub Pages: `backend/export_static.py`
+vuelca a JSON (1,3 MB) lo que no se puede calcular en el navegador —las fuerzas de cada
+pareja, clasificaciones, pronósticos de temporada y el backtest— y las matrices de
+marcadores, los mercados, el directo y el simulador se calculan en TypeScript
+(`frontend/src/lib/dixoncoles.ts`, idéntico a Python a 6 decimales). Las cuotas en vivo no
+se publican (son de uso personal según The Odds API), así que *Valor* y *Directo* solo
+existen en local.
+
+```bash
+cd backend && ../.venv/bin/python export_static.py
+cd ../frontend && BASE_PATH=/football-predictor bun run build:static    # -> build/
+```
 
 Lo pendiente está en [ROADMAP.md](ROADMAP.md).
