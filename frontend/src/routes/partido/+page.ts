@@ -13,5 +13,6 @@ export const load: PageLoad = async ({ fetch, url }) => {
   } catch (e) {
     error = (e as Error).message;
   }
-  return { leagues, league, teams, home, away, prediction, error };
+  const odds = await api.oddsHistory(league, home, away, fetch).catch(() => ({ points: [], kickoff: null }));
+  return { leagues, league, teams, home, away, prediction, error, odds };
 };

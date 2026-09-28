@@ -30,6 +30,19 @@ Walk-forward 2016/17 – 2025/26, cinco grandes ligas, 17.937 partidos. Log loss
 
 Todo el detalle, con gráficos, en la página **El modelo** de la app.
 
+## Contra las casas de apuestas
+
+Con datos públicos el modelo no le gana al mercado en ningún sitio: medido en 12 ligas y
+tres mercados (1X2, goles, hándicap asiático) con valor esperado contra la cuota de cierre
+(`backend/edge.py`), y tampoco añadiendo las bajas de API-Football (`backend/injuries.py`).
+
+Lo que hacen los profesionales es otra cosa: tomar la casa más afilada (Pinnacle) como
+verdad y buscar casas que se quedan atrás. `backend/odds_live.py` lo hace en vivo con
+[The Odds API](https://the-odds-api.com): ~19 casas en 12 ligas, probabilidad justa por el
+método de potencia (el proporcional sobrevalora a los tapados), y cada precio con valor
+queda registrado para puntuarlo contra el cierre. Consultas programadas con cron
+(`backend/cron_snapshot.sh`). Páginas *Valor* y *Mercado* (en cada partido) en la web.
+
 ## Cómo funciona
 
 1. **Datos** (`backend/ingest.py`): resultados, tiros, tarjetas y cuotas (Bet365, media del
@@ -62,11 +75,14 @@ cd backend
 cd ../frontend && bun install && bun run dev   # http://localhost:5173
 ```
 
+Cuotas en vivo: `ODDS_API_KEY` de [The Odds API](https://the-odds-api.com) (gratis, 500
+créditos al mes) en `backend/.env`, y `python odds_live.py snapshot`.
+
 Marcadores en directo: clave gratuita de [football-data.org](https://www.football-data.org) en
 `backend/.env` como `FOOTBALL_DATA_KEY=...`. Actualizar datos: `python ingest.py --refresh`
 y `POST /api/reload`.
 
-Tests: `cd backend && ../.venv/bin/python -m pytest -q` (24 tests, sin red).
+Tests: `cd backend && ../.venv/bin/python -m pytest -q` (34 tests, sin red).
 
 ## API
 

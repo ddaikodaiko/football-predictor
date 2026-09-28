@@ -149,6 +149,11 @@ def value(min_ev: float = Query(0.02, ge=0, le=0.5)):
     return _engine().value(min_ev)
 
 
+@app.get("/api/odds/history")
+def odds_history(league: str, home: str, away: str):
+    return _engine().odds_history(_league(league), home, away)
+
+
 @app.get("/api/value/clv")
 def value_clv():
     return _engine().clv()

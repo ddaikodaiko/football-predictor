@@ -280,6 +280,26 @@ class Engine:
         self._value_cache = {"key": key, "value": value}
         return value
 
+    def odds_history(self, league: str, home: str, away: str) -> dict:
+        """1X2 odds of one match over time, from every stored snapshot: the sharp fair
+        probability (Pinnacle without margin) and the best price on offer per outcome."""
+        snaps = pd.read_sql_query(
+            "SELECT fetched_at, kickoff, bookmaker, outcome, price FROM odds_snapshots"
+            " WHERE league = ? AND home = ? AND away = ? AND market = 'h2h'",
+            self.conn, params=[league, home, away])
+        if snaps.empty:
+            return {"points": [], "kickoff": None}
+        points = []
+        for at, g in snaps.groupby("fetched_at"):
+            fair = odds_live.fair_probabilities(g)
+            best = g.groupby("outcome")["price"].max()
+            books = g.loc[g.groupby("outcome")["price"].idxmax()].set_index("outcome")["bookmaker"]
+            points.append({"at": at, "reference": fair[1] if fair else None,
+                           "fair": fair[0] if fair else None,
+                           "best": best.to_dict(), "best_book": books.to_dict(),
+                           "books": int(g["bookmaker"].nunique())})
+        return _round({"points": points, "kickoff": snaps["kickoff"].iat[0]})
+
     def clv(self) -> dict:
         scored = odds_live.score_picks(self.conn)
         if scored.empty:

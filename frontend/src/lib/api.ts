@@ -86,6 +86,12 @@ export type Clv = {
   picks: (ValuePick & { seen_at: string; fair_close: number; ev_close: number; final: boolean })[];
 };
 
+export type OddsPoint = {
+  at: string; reference: string | null; books: number;
+  fair: { home: number; draw: number; away: number } | null;
+  best: Record<'home' | 'draw' | 'away', number>; best_book: Record<'home' | 'draw' | 'away', string>;
+};
+
 export type LiveMatch = {
   id: number; home: string; away: string; league: string; status: string; minute: number | null;
   score_home: number; score_away: number;
@@ -122,6 +128,9 @@ export const api = {
   value: (minEv = 0.02, f: Fetch = fetch) =>
     get<{ picks: ValuePick[]; snapshot: string | null; credits_left: number | null }>(f, `/api/value?min_ev=${minEv}`),
   clv: (f: Fetch = fetch) => get<Clv>(f, '/api/value/clv'),
+  oddsHistory: (league: string, home: string, away: string, f: Fetch = fetch) =>
+    get<{ points: OddsPoint[]; kickoff: string | null }>(
+      f, `/api/odds/history?${new URLSearchParams({ league, home, away })}`),
   live: (f: Fetch = fetch) => get<{ matches: LiveMatch[]; source?: string }>(f, '/api/live'),
 };
 

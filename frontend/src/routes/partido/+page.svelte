@@ -1,6 +1,7 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import FormPills from '$lib/components/FormPills.svelte';
+  import LineChart from '$lib/components/LineChart.svelte';
   import MatchSim from '$lib/components/MatchSim.svelte';
   import ProbBar from '$lib/components/ProbBar.svelte';
   import ScoreHeatmap from '$lib/components/ScoreHeatmap.svelte';
@@ -42,6 +43,15 @@
     { label: `${p.away} no encaja`, p: p.cs_away },
   ] : []);
 
+  const lastOdds = $derived(data.odds.points.at(-1) ?? null);
+  const book = (key: string) => key.replace(/_(eu|uk|fr|se|nl|it|de)$/, '').replace(/_/g, ' ');
+  const sides = $derived(p ? [
+    { key: 'home' as const, label: p.home, model: p.p_home },
+    { key: 'draw' as const, label: 'Empate', model: p.p_draw },
+    { key: 'away' as const, label: p.away, model: p.p_away },
+  ] : []);
+  const moves = $derived(data.odds.points.filter((x) => x.fair));
+
   const xgLine = (g: FormGame) => (g.xgf == null ? '' : `${g.xgf.toFixed(1)}–${g.xga?.toFixed(1)}`);
 </script>
 
@@ -79,6 +89,37 @@
         <p class="note warn">Uno de los equipos no tiene partidos recientes en esta liga (recién ascendido): el modelo lo trata como un equipo medio.</p>
       {/if}
     </section>
+
+    {#if lastOdds?.fair}
+      <section class="card market">
+        <h2>Mercado <small>{lastOdds.books} casas · probabilidad justa de {lastOdds.reference} sin margen</small></h2>
+        <table class="data">
+          <thead><tr><th></th><th class="r">Mercado</th><th class="r">Modelo</th><th class="r">Mejor cuota</th><th class="r">Valor a esa cuota</th></tr></thead>
+          <tbody>
+            {#each sides as s}
+              {@const fair = lastOdds.fair[s.key]}
+              {@const ev = fair * lastOdds.best[s.key] - 1}
+              <tr><td><b>{s.label}</b></td><td class="r">{pct(fair, 1)}</td>
+                <td class="r faint">{pct(s.model, 1)}</td>
+                <td class="r">{lastOdds.best[s.key]?.toFixed(2)} <span class="faint">{book(lastOdds.best_book[s.key])}</span></td>
+                <td class="r"><span class="pill {ev > 0.02 ? 'pill-green' : ''}">{ev >= 0 ? '+' : ''}{pct(ev, 1)}</span></td></tr>
+            {/each}
+          </tbody>
+        </table>
+        {#if moves.length > 1}
+          <div class="moves">
+            <LineChart yFormat={(v) => pct(v)} labels={moves.map((m) => new Date(m.at).toLocaleDateString('es', { day: 'numeric', month: 'short' }))}
+              series={[
+                { label: p.home, color: 'var(--home)', values: moves.map((m) => m.fair!.home) },
+                { label: 'Empate', color: 'var(--draw)', values: moves.map((m) => m.fair!.draw) },
+                { label: p.away, color: 'var(--away)', values: moves.map((m) => m.fair!.away) },
+              ]} />
+          </div>
+        {:else}
+          <p class="note">Con más consultas de cuotas aquí saldrá cómo se mueve el mercado hasta el partido.</p>
+        {/if}
+      </section>
+    {/if}
 
     <div class="grid grid-2">
       <section class="card">
@@ -164,6 +205,8 @@
 </div>
 
 <style>
+  .market { margin-bottom: 16px; }
+  .moves { margin-top: 14px; }
   .pickers { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; padding: 12px; }
   select { background: var(--bg3); color: var(--text); border: 1px solid var(--border2); border-radius: 8px; padding: 8px 10px; }
   .hero { display: grid; grid-template-columns: 1fr auto 1fr; gap: 16px; align-items: center; margin-bottom: 16px; }
