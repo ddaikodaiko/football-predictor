@@ -52,3 +52,21 @@ def test_power_method_takes_more_margin_from_long_shots():
     proportional = (1 / prices) / (1 / prices).sum()
     assert power.sum() == pytest.approx(1)
     assert power[2] < proportional[2] and power[0] > proportional[0]
+
+
+def test_a_pick_is_only_scored_against_a_later_snapshot(tmp_path, monkeypatch):
+    import store
+    import odds_live
+
+    monkeypatch.setattr(store, "DB_PATH", tmp_path / "t.db")
+    conn = odds_live.connect()
+    rows = lambda at, home_price: [(at, "SP1", "e", "2099-01-01T00:00:00Z", "A", "B", "A", "B", book, "h2h", out, None, price)
+                                   for book, out, price in [("pinnacle", "home", 2.0), ("pinnacle", "draw", 3.6),
+                                                            ("pinnacle", "away", 4.2), ("unibet", "home", home_price)]]
+    conn.executemany(f"INSERT INTO odds_snapshots VALUES ({', '.join('?' * 13)})", rows("2026-01-01T10:00:00", 2.2))
+    picks = odds_live.find_value(odds_live.latest(conn), 0.02)
+    odds_live.record_picks(conn, picks)
+    assert odds_live.score_picks(conn).empty                     # same snapshot: not scored
+    conn.executemany(f"INSERT INTO odds_snapshots VALUES ({', '.join('?' * 13)})", rows("2030-01-01T10:00:00", 2.2))
+    scored = odds_live.score_picks(conn)
+    assert len(scored) == 1

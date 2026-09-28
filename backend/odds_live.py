@@ -120,7 +120,7 @@ def snapshot(conn, league: str, key: str | None = None) -> dict:
     key = key or os.environ.get("ODDS_API_KEY", "")
     if not key:
         raise SystemExit("falta ODDS_API_KEY en backend/.env")
-    last = conn.execute("SELECT remaining FROM odds_api_usage ORDER BY at DESC LIMIT 1").fetchone()
+    last = conn.execute("SELECT remaining FROM odds_api_usage ORDER BY rowid DESC LIMIT 1").fetchone()
     if last and last[0] is not None and last[0] < RESERVE:
         raise SystemExit(f"quedan {last[0]} créditos: por debajo de la reserva ({RESERVE}), no gasto")
     resp = requests.get(API.format(sport=SPORTS[league]), timeout=30, params={
@@ -256,8 +256,9 @@ def score_picks(conn) -> pd.DataFrame:
     snaps = snaps[snaps["fetched_at"] < snaps["kickoff"]]
     rows = []
     for p in picks.itertuples(index=False):
-        g = snaps[(snaps["event_id"] == p.event_id) & (snaps["market"] == p.market) & (snaps["point"] == (p.point or 0.0))]
-        if g.empty:
+        g = snaps[(snaps["event_id"] == p.event_id) & (snaps["market"] == p.market)
+                  & (snaps["point"] == (p.point or 0.0)) & (snaps["fetched_at"] > p.seen_at)]
+        if g.empty:   # no snapshot after the pick was seen: nothing to score it against yet
             continue
         last = g[g["fetched_at"] == g["fetched_at"].max()]
         fair = fair_probabilities(last)

@@ -8,6 +8,7 @@
   const links = [
     { href: '/', label: 'Partidos' },
     { href: '/liga/SP1', label: 'Ligas', match: '/liga' },
+    { href: '/valor', label: 'Valor' },
     { href: '/modelo', label: 'El modelo' },
     { href: '/directo', label: 'Directo' },
   ];

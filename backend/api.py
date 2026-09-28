@@ -144,6 +144,16 @@ def backtest():
     return _engine().backtest
 
 
+@app.get("/api/value")
+def value(min_ev: float = Query(0.02, ge=0, le=0.5)):
+    return _engine().value(min_ev)
+
+
+@app.get("/api/value/clv")
+def value_clv():
+    return _engine().clv()
+
+
 @app.get("/api/live")
 def live_matches():
     return live.live_matches()

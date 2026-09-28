@@ -13,6 +13,7 @@ from functools import cached_property
 import numpy as np
 import pandas as pd
 
+import odds_live
 import store
 from backtest import COMPANION, OUT_DIR as BACKTEST_DIR, market_probs, outcome_index, report, scores
 from ingest import LEAGUES, UNDERSTAT_LEAGUES, season_code
@@ -33,6 +34,7 @@ class UnknownLeague(KeyError):
 class Engine:
     def __init__(self, db_path=None):
         self.conn = store.connect(db_path)
+        self.conn.executescript(odds_live.SCHEMA)
         self._write = threading.Lock()
         self.reload()
 
@@ -41,6 +43,10 @@ class Engine:
         self.matches = store.load_matches(self.conn)
         self.season = season_code(datetime.now(timezone.utc).date())
         self.all_fixtures = store.load_fixtures(self.conn, season=self.season)
+        # Filtering 95k rows costs ~20 ms and pages ask for it hundreds of times: split once.
+        self._by_league = {code: df for code, df in self.matches.groupby("league")}
+        self._teams: dict[str, list[str]] = {}
+        self._value_cache: dict = {}
         self._models: dict[str, DixonColes] = {}
         self._forecasts: dict[tuple[str, int], dict] = {}
         self.__dict__.pop("backtest", None)
@@ -50,7 +56,7 @@ class Engine:
     def _league(self, league: str) -> pd.DataFrame:
         if league not in LEAGUES:
             raise UnknownLeague(league)
-        return self.matches[self.matches["league"] == league]
+        return self._by_league.get(league, self.matches.iloc[0:0])
 
     def leagues(self) -> list[dict]:
         out = []
@@ -100,11 +106,13 @@ class Engine:
         return lg[lg["season"] == self.season]
 
     def teams(self, league: str) -> list[str]:
-        cur = self.current(league)
-        teams = set(cur["home"]) | set(cur["away"])
-        fixtures = self.fixtures(league)
-        teams |= set(fixtures["home"]) | set(fixtures["away"])
-        return sorted(teams)
+        if league not in self._teams:
+            cur = self.current(league)
+            teams = set(cur["home"]) | set(cur["away"])
+            fixtures = self.fixtures(league)
+            teams |= set(fixtures["home"]) | set(fixtures["away"])
+            self._teams[league] = sorted(teams)
+        return self._teams[league]
 
     def table(self, league: str) -> list[dict]:
         t = standings(self.current(league))
@@ -138,7 +146,7 @@ class Engine:
         return rows
 
     def h2h(self, league: str, home: str, away: str, n: int = 6) -> list[dict]:
-        lg = self.matches
+        lg = self._league(league)
         games = lg[((lg["home"] == home) & (lg["away"] == away)) | ((lg["home"] == away) & (lg["away"] == home))]
         return [{"date": g.date.strftime("%Y-%m-%d"), "home": g.home, "away": g.away,
                  "fthg": int(g.fthg), "ftag": int(g.ftag)} for g in games.tail(n).itertuples(index=False)][::-1]
@@ -237,6 +245,52 @@ class Engine:
                               for team, row in f.positions.iterrows()},
             }
         return self._forecasts[key]
+
+    # ── live value (odds_live.py) ──────────────────────────────────────────────
+
+    def value(self, min_ev: float = 0.02) -> dict:
+        """Prices above the sharp fair probability in the latest snapshot, with the
+        model's own probability alongside where it has one (1X2 and over/under 2.5)."""
+        stamp = self.conn.execute("SELECT MAX(rowid) FROM odds_snapshots").fetchone()[0]
+        if stamp is None:
+            return {"picks": [], "snapshot": None}
+        key = (stamp, min_ev)
+        if self._value_cache.get("key") == key:
+            return self._value_cache["value"]
+        snap = odds_live.latest(self.conn)
+        picks = odds_live.find_value(snap, min_ev)
+        rows = []
+        cache: dict[tuple, dict] = {}
+        for p in picks.to_dict(orient="records"):
+            model_p = None
+            if p["league"] in LEAGUES and p["home"] in self.teams(p["league"]) and p["away"] in self.teams(p["league"]):
+                match = (p["league"], p["home"], p["away"])
+                if match not in cache:
+                    dc = self.model(p["league"])
+                    cache[match] = markets(dc.score_matrix(p["home"], p["away"]))
+                pred = cache[match]
+                if p["market"] == "h2h":
+                    model_p = pred[{"home": "p_home", "draw": "p_draw", "away": "p_away"}[p["outcome"]]]
+                elif p["market"] == "totals" and p["point"] == 2.5:
+                    model_p = pred["over25"] if p["outcome"] == "over" else 1 - pred["over25"]
+            rows.append({**p, "model_p": model_p})
+        usage = self.conn.execute("SELECT at, remaining FROM odds_api_usage ORDER BY rowid DESC LIMIT 1").fetchone()
+        value = _round({"picks": rows, "snapshot": snap["fetched_at"].max(),
+                        "credits_left": usage[1] if usage else None})
+        self._value_cache = {"key": key, "value": value}
+        return value
+
+    def clv(self) -> dict:
+        scored = odds_live.score_picks(self.conn)
+        if scored.empty:
+            return {"n": 0, "picks": []}
+        final = scored[scored["final"]]
+        summary = lambda df: None if len(df) < 2 else {
+            "n": len(df), "ev_close": float(df["ev_close"].mean()),
+            "t": float(df["ev_close"].mean() / (df["ev_close"].std(ddof=1) / np.sqrt(len(df)))),
+            "beat_close": float((df["ev_close"] > 0).mean())}
+        return _round({"n": len(scored), "all": summary(scored), "final": summary(final),
+                       "picks": scored.sort_values("kickoff", ascending=False).head(100).to_dict(orient="records")})
 
     # ── backtest ───────────────────────────────────────────────────────────────
 

@@ -73,6 +73,19 @@ export type Backtest = {
   bet_everything_roi: number;
 };
 
+export type ValuePick = {
+  event_id: string; league: string; kickoff: string; home: string; away: string;
+  market: 'h2h' | 'totals' | 'spreads'; outcome: string; point: number;
+  bookmaker: string; price: number; fair_p: number; ev: number; reference: string; model_p: number | null;
+};
+
+export type ClvSummary = { n: number; ev_close: number; t: number; beat_close: number } | null;
+
+export type Clv = {
+  n: number; all?: ClvSummary; final?: ClvSummary;
+  picks: (ValuePick & { seen_at: string; fair_close: number; ev_close: number; final: boolean })[];
+};
+
 export type LiveMatch = {
   id: number; home: string; away: string; league: string; status: string; minute: number | null;
   score_home: number; score_away: number;
@@ -106,6 +119,9 @@ export const api = {
   timeline: (league: string, home: string, away: string, seed?: number) =>
     post<Timeline>(fetch, '/api/simulate/match', { league, home, away, seed }),
   backtest: (f: Fetch = fetch) => get<Backtest>(f, '/api/backtest'),
+  value: (minEv = 0.02, f: Fetch = fetch) =>
+    get<{ picks: ValuePick[]; snapshot: string | null; credits_left: number | null }>(f, `/api/value?min_ev=${minEv}`),
+  clv: (f: Fetch = fetch) => get<Clv>(f, '/api/value/clv'),
   live: (f: Fetch = fetch) => get<{ matches: LiveMatch[]; source?: string }>(f, '/api/live'),
 };
 
