@@ -43,6 +43,11 @@ LEAGUES = {
 }
 UNDERSTAT_LEAGUES = {"E0": "EPL", "SP1": "La_liga", "D1": "Bundesliga", "I1": "Serie_A", "F1": "Ligue_1"}
 FIRST_UNDERSTAT_YEAR = 2014
+# openfootball/football.json: full season calendars, free, no account. Used for the
+# fixtures of leagues understat doesn't cover (it has no second divisions or N1/P1).
+OPENFOOTBALL_URL = "https://raw.githubusercontent.com/openfootball/football.json/master/{season}/{code}.json"
+OPENFOOTBALL = {"E0": "en.1", "E1": "en.2", "SP1": "es.1", "SP2": "es.2", "D1": "de.1", "D2": "de.2",
+                "I1": "it.1", "I2": "it.2", "F1": "fr.1", "F2": "fr.2", "N1": "nl.1", "P1": "pt.1"}
 
 # football-data column -> store column. Lists are tried in order: names changed over the years.
 FD_COLUMNS = {
@@ -57,6 +62,12 @@ FD_COLUMNS = {
     "pin_h": ["PSH"], "pin_d": ["PSD"], "pin_a": ["PSA"],
     "close_h": ["PSCH", "B365CH", "AvgCH"], "close_d": ["PSCD", "B365CD", "AvgCD"],
     "close_a": ["PSCA", "B365CA", "AvgCA"],
+    "ou_avg_o": ["Avg>2.5", "BbAv>2.5"], "ou_avg_u": ["Avg<2.5", "BbAv<2.5"],
+    "ou_b365_o": ["B365>2.5"], "ou_b365_u": ["B365<2.5"],
+    "ou_pin_o": ["P>2.5"], "ou_pin_u": ["P<2.5"],
+    "ou_close_o": ["PC>2.5", "AvgC>2.5", "B365C>2.5"], "ou_close_u": ["PC<2.5", "AvgC<2.5", "B365C<2.5"],
+    "ah_line": ["AHh", "BbAHh"], "ah_avg_h": ["AvgAHH", "BbAvAHH"], "ah_avg_a": ["AvgAHA", "BbAvAHA"],
+    "ah_close_line": ["AHCh"], "ah_close_h": ["PCAHH", "AvgCAHH"], "ah_close_a": ["PCAHA", "AvgCAHA"],
 }
 
 
@@ -206,6 +217,86 @@ def attach_xg(fd: pd.DataFrame, us: pd.DataFrame, mapping: dict[str, str]) -> tu
     return fd, matched
 
 
+# ─── openfootball ──────────────────────────────────────────────────────────────
+
+def parse_openfootball(body: bytes) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """openfootball season JSON -> (played with scores, pending), source team names.
+    Same column names as the understat parsers, so the name matching is shared."""
+    played, pending = [], []
+    for m in json.loads(body).get("matches", []):
+        score = m.get("score")
+        # Usually {"ht": [..], "ft": [..]}, sometimes just the final [h, a].
+        ft = score.get("ft") if isinstance(score, dict) else score
+        row = {"date": m["date"], "home_us": m["team1"], "away_us": m["team2"]}
+        if ft:
+            played.append({**row, "gh": int(ft[0]), "ga": int(ft[1])})
+        else:
+            pending.append(row)
+    return (pd.DataFrame(played, columns=["date", "home_us", "away_us", "gh", "ga"]),
+            pd.DataFrame(pending, columns=["date", "home_us", "away_us"]))
+
+
+def store_fixtures(conn, league: str, season: str, pending: pd.DataFrame, mapping: dict[str, str],
+                   source: str) -> int:
+    pending = pending.assign(home=pending["home_us"].map(mapping),
+                             away=pending["away_us"].map(mapping)).dropna(subset=["home", "away"])
+    with conn:
+        conn.executemany("INSERT OR REPLACE INTO team_map VALUES (?, ?, ?, ?)",
+                         [(league, source, k, v) for k, v in mapping.items()])
+        conn.execute("DELETE FROM fixtures WHERE league = ? AND season = ?", (league, season))
+        conn.executemany("INSERT OR REPLACE INTO fixtures VALUES (?, ?, ?, ?, ?)",
+                         [(league, season, d, h, a) for d, h, a in pending[["date", "home", "away"]].itertuples(index=False)])
+    return len(pending)
+
+
+def ingest_openfootball_fixtures(conn, league: str, season: str, fd: pd.DataFrame, refresh: bool) -> str:
+    code = OPENFOOTBALL.get(league)
+    if code is None or fd.empty:
+        return ""
+    folder = f"{season_start_year(season)}-{season[2:]}"
+    body = fetch_cached(OPENFOOTBALL_URL.format(season=folder, code=code),
+                        RAW_DIR / "openfootball" / folder / f"{code}.json", True, refresh)
+    if body is None:
+        return ""
+    played, pending = parse_openfootball(body)
+    mapping = {**store.team_map(conn, league, "openfootball"), **build_team_map(fd, played)}
+    n = store_fixtures(conn, league, season, pending, mapping, "openfootball")
+    lost = len(pending) - n
+    return f"calendario openfootball: {n} pendientes" + (f", {lost} sin mapear" if lost else "")
+
+
+# ─── odds for the coming matches ───────────────────────────────────────────────
+
+FIXTURES_URL = "https://www.football-data.co.uk/fixtures.csv"
+
+
+def ingest_upcoming_odds(conn, refresh: bool) -> int:
+    """fixtures.csv: the next round of every league football-data covers, with odds.
+    Only our leagues are kept; rows of matches already played are harmless (they never
+    match a pending fixture)."""
+    body = fetch_cached(FIXTURES_URL, RAW_DIR / "football-data" / "fixtures.csv", True, refresh)
+    if body is None:
+        return 0
+    raw = pd.read_csv(StringIO(body.decode("utf-8-sig", errors="replace")), on_bad_lines="skip")
+    raw = raw[raw["Div"].isin(LEAGUES)]
+    if raw.empty:
+        return 0
+    num = lambda c: pd.to_numeric(raw[c], errors="coerce") if c in raw else pd.Series(pd.NA, index=raw.index)
+    rows = pd.DataFrame({
+        "league": raw["Div"],
+        "date": pd.to_datetime(raw["Date"], dayfirst=True, format="mixed", errors="coerce").dt.strftime("%Y-%m-%d"),
+        "home": raw["HomeTeam"].str.strip(), "away": raw["AwayTeam"].str.strip(),
+        "avg_h": num("AvgH"), "avg_d": num("AvgD"), "avg_a": num("AvgA"),
+        "b365_h": num("B365H"), "b365_d": num("B365D"), "b365_a": num("B365A"),
+        "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }).dropna(subset=["date"])
+    with conn:
+        conn.execute("DELETE FROM upcoming_odds")
+        conn.executemany(f"INSERT OR REPLACE INTO upcoming_odds VALUES ({', '.join('?' * 11)})",
+                         rows.astype(object).where(rows.notna(), None).itertuples(index=False))
+    return len(rows)
+
+
 # ─── orchestration ─────────────────────────────────────────────────────────────
 
 def ingest_season(conn, league: str, season: str, current: bool, refresh: bool,
@@ -232,19 +323,9 @@ def ingest_season(conn, league: str, season: str, current: bool, refresh: bool,
             unmapped = sorted(set(us["home_us"]) - set(mapping))
             if unmapped:
                 note = f"sin mapear: {', '.join(unmapped)}"
-            pending = parse_understat_fixtures(us_body)
-            pending = pending.assign(home=pending["home_us"].map(mapping),
-                                     away=pending["away_us"].map(mapping)).dropna(subset=["home", "away"])
-            with conn:
-                conn.executemany(
-                    "INSERT OR REPLACE INTO team_map VALUES (?, 'understat', ?, ?)",
-                    [(league, k, v) for k, v in mapping.items()],
-                )
-                conn.execute("DELETE FROM fixtures WHERE league = ? AND season = ?", (league, season))
-                conn.executemany(
-                    "INSERT OR REPLACE INTO fixtures VALUES (?, ?, ?, ?, ?)",
-                    [(league, season, d, h, a) for d, h, a in pending[["date", "home", "away"]].itertuples(index=False)],
-                )
+            store_fixtures(conn, league, season, parse_understat_fixtures(us_body), mapping, "understat")
+    elif current:
+        note = ingest_openfootball_fixtures(conn, league, season, fd, refresh)
     n = store.replace_season(conn, league, season, fd)
     with conn:
         conn.execute("INSERT OR REPLACE INTO ingest_log VALUES (?, ?, 'football-data', ?, ?)",
@@ -269,6 +350,7 @@ def main() -> int:
             if r["matches"]:
                 xg = f"  xG {r['xg']}/{r['matches']}" if r["xg"] else ""
                 print(f"{league:4s} {season}  {r['matches']:4d} partidos{xg}  {r['note']}", flush=True)
+    print(f"\ncuotas de la próxima jornada: {ingest_upcoming_odds(conn, args.refresh)} partidos")
     print()
     print(store.summary(conn).to_string(index=False))
     return 0

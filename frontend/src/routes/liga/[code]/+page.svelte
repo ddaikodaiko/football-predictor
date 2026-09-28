@@ -59,7 +59,7 @@
       <table class="data">
         <thead>
           <tr><th>#</th><th>Equipo</th><th class="r">Pts hoy</th><th class="r">Pts final</th>
-            <th class="r">Campeón</th><th class="r">Top {f.zones.europe}</th><th class="r">Descenso</th></tr>
+            <th class="r">Campeón</th><th class="r">{f.zones.top_label} (top {f.zones.europe})</th><th class="r">Descenso</th></tr>
         </thead>
         <tbody>
           {#each f.table as r, i}

@@ -22,9 +22,13 @@ import store
 from ingest import season_code
 from ratings import DixonColes, score_matrix
 
-# Places that matter per league: (title, champions league, relegation from the bottom).
+# Places that matter per league: (title, top zone, relegation from the bottom). The top
+# zone is the Champions League places in a first division and direct promotion in a
+# second one (see ZONE_LABELS). Play-off places aren't modelled.
 ZONES = {"E0": (1, 4, 3), "SP1": (1, 4, 3), "D1": (1, 4, 2), "I1": (1, 4, 3), "F1": (1, 3, 2),
-         "N1": (1, 2, 2), "P1": (1, 2, 2)}
+         "N1": (1, 2, 2), "P1": (1, 2, 2),
+         "E1": (1, 2, 3), "SP2": (1, 2, 4), "D2": (1, 2, 2), "I2": (1, 2, 3), "F2": (1, 2, 2)}
+ZONE_LABELS = {"E1": "Ascenso", "SP2": "Ascenso", "D2": "Ascenso", "I2": "Ascenso", "F2": "Ascenso"}
 DEFAULT_ZONES = (1, 4, 3)
 
 

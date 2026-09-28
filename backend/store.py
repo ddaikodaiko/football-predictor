@@ -34,6 +34,12 @@ MATCH_COLUMNS = {
     "avg_h": "REAL", "avg_d": "REAL", "avg_a": "REAL",
     "pin_h": "REAL", "pin_d": "REAL", "pin_a": "REAL",
     "close_h": "REAL", "close_d": "REAL", "close_a": "REAL",
+    # Over/under 2.5 goals: market average, Bet365, Pinnacle, and closing.
+    "ou_avg_o": "REAL", "ou_avg_u": "REAL", "ou_b365_o": "REAL", "ou_b365_u": "REAL",
+    "ou_pin_o": "REAL", "ou_pin_u": "REAL", "ou_close_o": "REAL", "ou_close_u": "REAL",
+    # Asian handicap (line for the home side): pre-match market average, and closing.
+    "ah_line": "REAL", "ah_avg_h": "REAL", "ah_avg_a": "REAL",
+    "ah_close_line": "REAL", "ah_close_h": "REAL", "ah_close_a": "REAL",
 }
 
 SCHEMA = f"""
@@ -77,6 +83,19 @@ CREATE TABLE IF NOT EXISTS fixtures (
     PRIMARY KEY (league, season, home, away)
 );
 
+-- Bookmaker odds for the coming matches (football-data.co.uk fixtures.csv, refreshed
+-- midweek). Same team names as `matches`.
+CREATE TABLE IF NOT EXISTS upcoming_odds (
+    league TEXT NOT NULL,
+    date TEXT NOT NULL,
+    home TEXT NOT NULL,
+    away TEXT NOT NULL,
+    avg_h REAL, avg_d REAL, avg_a REAL,
+    b365_h REAL, b365_d REAL, b365_a REAL,
+    fetched_at TEXT NOT NULL,
+    PRIMARY KEY (league, date, home, away)
+);
+
 CREATE TABLE IF NOT EXISTS ingest_log (
     league TEXT NOT NULL,
     season TEXT NOT NULL,
@@ -94,6 +113,12 @@ def connect(path: Path | None = None) -> sqlite3.Connection:
     # The API reads from worker threads; writes are serialised by the caller (engine.py).
     conn = sqlite3.connect(path, check_same_thread=False)
     conn.executescript(SCHEMA)
+    # Columns added after a database was created: add them empty (re-run ingest.py to fill).
+    have = {row[1] for row in conn.execute("PRAGMA table_info(matches)")}
+    for name, kind in MATCH_COLUMNS.items():
+        if name not in have:
+            conn.execute(f"ALTER TABLE matches ADD COLUMN {name} {kind.replace(' NOT NULL', '')}")
+    conn.commit()
     return conn
 
 
@@ -155,3 +180,7 @@ def team_map(conn: sqlite3.Connection, league: str, source: str = "understat") -
     rows = conn.execute("SELECT source_name, name FROM team_map WHERE league = ? AND source = ?",
                         (league, source)).fetchall()
     return dict(rows)
+
+
+def load_upcoming_odds(conn: sqlite3.Connection) -> pd.DataFrame:
+    return pd.read_sql_query("SELECT * FROM upcoming_odds", conn)

@@ -6,7 +6,7 @@ type Fetch = typeof fetch;
 
 export type League = {
   code: string; name: string; flag: string; tier: 1 | 2; season: string;
-  played: number; has_xg: boolean; has_fixtures: boolean; last_match: string | null;
+  played: number; has_xg: boolean; has_fixtures: boolean; has_forecast: boolean; last_match: string | null;
 };
 
 export type TableRow = {
@@ -28,7 +28,7 @@ export type ForecastRow = {
 
 export type Forecast = {
   league: string; season: string; sims: number; remaining: number;
-  zones: { title: number; europe: number; relegation: number };
+  zones: { title: number; europe: number; relegation: number; top_label: string };
   table: ForecastRow[]; positions: Record<string, number[]>;
 };
 

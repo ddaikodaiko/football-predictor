@@ -10,7 +10,7 @@ export const load: PageLoad = async ({ fetch, params }) => {
     api.table(params.code, fetch),
     api.ratings(params.code, fetch),
     api.fixtures(params.code, 20, fetch).catch(() => []),
-    league.has_fixtures ? api.forecast(params.code, fetch).catch(() => null) : Promise.resolve(null),
+    league.has_forecast ? api.forecast(params.code, fetch).catch(() => null) : Promise.resolve(null),
   ]);
   return { leagues, league, table, ratings, fixtures, forecast };
 };

@@ -62,6 +62,43 @@ Polymarket o las casas) no se sostiene con este modelo. No tiene sentido constru
 de apuestas sobre él. Si algún día el modelo incorpora bajas y alineaciones, se vuelve a
 medir con el mismo backtest antes de nada.
 
+## ¿Se puede batir a las casas? (28-09-2026, `backend/edge.py`)
+
+Objetivo del proyecto: competir con los modelos de las casas. Medido en 12 ligas desde
+2019/20 (30.973 partidos), tres mercados, con la métrica profesional: **valor esperado de
+cada apuesta bajo la probabilidad justa de cierre** (CLV), que no depende de la suerte.
+
+**El modelo no tiene ventaja en ningún sitio.**
+
+| Mercado | EV vs cierre (todas las ligas) | t | Ganancia de información sobre el mercado previo |
+|---|---|---|---|
+| 1X2 | −6,5 % | −99 | +0,0002 (nula) |
+| Más/menos 2,5 | −5,2 % | −100 | +0,0002 (nula) |
+| Hándicap asiático | −3,6 % | −35 | — |
+
+- Negativo en las 12 ligas y los 3 mercados. Las segundas divisiones **no** son más blandas
+  para este modelo (peores, de hecho).
+- Combinar modelo + cuota previa predice igual que la cuota previa sola (0,9678 contra
+  0,9674): el mercado ya incorpora todo lo que sabe el modelo.
+- Mejoras del modelo medidas: ajuste conjunto con la segunda división 0,9793 → **0,9786**
+  (activado); ventana de 2 o 5 años y ξ entre 0,001 y 0,005, dentro del ruido.
+
+**Casa afilada contra blandas** (la probabilidad de Pinnacle como verdad, apostar donde
+otra casa paga más):
+
+- 2019-2026: contra la cuota máxima, EV vs cierre +4 % (t = +33) pero **ROI real −1 %**;
+  contra Bet365, EV +1,8 % (t = +6) y ROI +9,5 % en 1.836 apuestas.
+- 2024-2026: contra Bet365, EV +0,6 % (t = 0,8): ya no hay nada. Contra la máxima, ROI de
+  −5 % a −24 %: esas cuotas máximas no se pueden coger de verdad.
+- Pinnacle ya no aparece en football-data desde 2026/27; Betfair exchange como referencia
+  no da ventaja contra Bet365 (EV −6 %).
+
+**Qué haría falta para competir de verdad** (ninguna es gratis y sin cuenta):
+cuotas en tiempo real de muchas casas para comprar el mejor precio al momento, alineaciones y
+bajas antes que el mercado, y cuotas de apertura (las que se corrigen después). Con datos
+públicos, el techo realista es lo que hay: probabilidades al ~85 % del mercado y bien
+calibradas.
+
 ## Pendiente
 
 - [ ] **Capturas** para el README y **despliegue** (necesita un sitio para la API Python y la base de ~90 MB).

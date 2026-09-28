@@ -73,10 +73,17 @@ def scores(p: np.ndarray, y: np.ndarray) -> dict:
 
 # ─── walk-forward ──────────────────────────────────────────────────────────────
 
+# Second division fitted together with each first division (see ratings.DixonColes).
+COMPANION = {"E0": "E1", "SP1": "SP2", "D1": "D2", "I1": "I2", "F1": "F2"}
+
+
 def walk_forward(matches: pd.DataFrame, league: str, seasons: list[str], xg_weight: float,
-                 refit_days: int = 7, **dc_kwargs) -> pd.DataFrame:
+                 refit_days: int = 7, joint: bool = False, **dc_kwargs) -> pd.DataFrame:
     """Predict every match of `seasons` with a model fitted on the past only."""
     lg = matches[matches["league"] == league].sort_values("date")
+    fit_on = lg
+    if joint and league in COMPANION:
+        fit_on = matches[matches["league"].isin([league, COMPANION[league]])].sort_values("date")
     target = lg[lg["season"].isin(seasons)]
     if target.empty:
         return pd.DataFrame()
@@ -89,23 +96,25 @@ def walk_forward(matches: pd.DataFrame, league: str, seasons: list[str], xg_weig
         week = target[(target["date"] >= cut) & (target["date"] < nxt)]
         if not week.empty:
             try:
-                dc = DixonColes(xg_weight=xg_weight, **dc_kwargs).fit(lg, as_of=cut)
+                dc = DixonColes(xg_weight=xg_weight, **dc_kwargs).fit(fit_on, as_of=cut, primary=league)
             except ValueError:
                 cut = nxt
                 continue
             for m in week.itertuples(index=False):
                 lh, la = dc.lambdas(m.home, m.away)
-                ph, pd_, pa = outcome_probs(dc.score_matrix(m.home, m.away))
-                rows.append({"league": league, "season": m.season, "date": m.date,
+                sm = dc.score_matrix(m.home, m.away)
+                ph, pd_, pa = outcome_probs(sm)
+                i, j = np.indices(sm.shape)
+                rows.append({"p_over25": float(sm[i + j > 2.5].sum()),"league": league, "season": m.season, "date": m.date,
                              "home": m.home, "away": m.away, "fthg": m.fthg, "ftag": m.ftag,
                              "p_home": ph, "p_draw": pd_, "p_away": pa,
-                             "lambda_home": lh, "lambda_away": la,
+                             "lambda_home": lh, "lambda_away": la, "rho": dc.rho,
                              "known": dc.knows(m.home) and dc.knows(m.away)})
         cut = nxt
     out = pd.DataFrame(rows)
     # Carry the odds along so the betting simulator can replay the season.
     odds_cols = [c for c in store.MATCH_COLUMNS
-                 if c.split("_")[0] in {"b365", "avg", "pin", "close"} and c in target.columns]
+                 if c.split("_")[0] in {"b365", "avg", "pin", "close", "ou", "ah"} and c in target.columns]
     return out.merge(target[["date", "home", "away", *odds_cols]], on=["date", "home", "away"], how="left")
 
 
@@ -138,17 +147,31 @@ def main() -> int:
     parser.add_argument("--to", dest="last", type=int, default=2025, help="last season start year")
     parser.add_argument("--xg", default="0,0.5", help="xg_weight values to compare")
     parser.add_argument("--xi", type=float, default=0.003)
+    parser.add_argument("--prior", type=float, default=1.0)
+    parser.add_argument("--max-days", type=int, default=3 * 365)
+    parser.add_argument("--joint", action="store_true", help="fit each first division with its second")
+    parser.add_argument("--name", default=None, help="output file name (default: from the parameters)")
     args = parser.parse_args()
 
     conn = store.connect()
-    matches = store.load_matches(conn, args.leagues.split(","))
+    leagues = args.leagues.split(",")
+    extra = [COMPANION[l] for l in leagues if args.joint and l in COMPANION]
+    matches = store.load_matches(conn, leagues + extra)
     seasons = sorted({s for s in matches["season"] if args.first <= season_start_year(s) <= args.last})
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     for w in (float(x) for x in args.xg.split(",")):
         name = f"dc_xg{w:g}_xi{args.xi:g}"
+        if args.prior != 1.0:
+            name += f"_sd{args.prior:g}"
+        if args.max_days != 3 * 365:
+            name += f"_d{args.max_days}"
+        if args.joint:
+            name += "_joint"
+        name = args.name or name
         t0 = time.time()
-        pred = pd.concat([walk_forward(matches, lg, seasons, w, xi=args.xi)
-                          for lg in args.leagues.split(",")], ignore_index=True)
+        pred = pd.concat([walk_forward(matches, lg, seasons, w, joint=args.joint, xi=args.xi,
+                                       prior_sd=args.prior, max_days=args.max_days)
+                          for lg in leagues], ignore_index=True)
         pred.to_csv(OUT_DIR / f"{name}.csv.gz", index=False)
         table = report(pred)
         total = table["partidos"].sum()

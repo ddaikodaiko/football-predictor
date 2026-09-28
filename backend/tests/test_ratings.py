@@ -73,3 +73,21 @@ def test_unknown_team_gets_average_ratings():
     dc = DixonColes(max_days=10_000).fit(df)
     lh, la = dc.lambdas("Promoted FC", "Also New")
     assert lh == pytest.approx(np.exp(dc.mu + dc.home_adv)) and la == pytest.approx(np.exp(dc.mu))
+
+
+def test_joint_fit_puts_two_divisions_on_one_scale():
+    """A strong team in a weaker division: fitted together, the division offset says
+    'lower level', so the team's rating is comparable with the top division's."""
+    top, *_ = synthetic_league(n_teams=8, rounds=4, seed=1)
+    low, *_ = synthetic_league(n_teams=8, rounds=4, seed=2)
+    low = low.assign(home=low["home"].str.replace("T", "L"), away=low["away"].str.replace("T", "L"))
+    # The lower division scores fewer goals (weaker attacks everywhere).
+    low = low.assign(fthg=(low["fthg"] * 0.6).round(), ftag=(low["ftag"] * 0.6).round())
+    # Two teams move between divisions and link the scales.
+    bridge = top.iloc[:40].assign(home="L00")
+    df = pd.concat([top.assign(league="A"), low.assign(league="B"), bridge.assign(league="A")])
+    dc = DixonColes(max_days=10_000).fit(df, primary="A")
+    assert set(dc.division_offsets) == {"B"}
+    assert dc.division_offsets["B"][0] < -0.2                  # fewer goals down there
+    single = DixonColes(max_days=10_000).fit(top)
+    assert dc.home_adv == pytest.approx(single.home_adv, abs=0.1)

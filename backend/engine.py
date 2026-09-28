@@ -14,15 +14,15 @@ import numpy as np
 import pandas as pd
 
 import store
-from backtest import OUT_DIR as BACKTEST_DIR, market_probs, outcome_index, report, scores
+from backtest import COMPANION, OUT_DIR as BACKTEST_DIR, market_probs, outcome_index, report, scores
 from ingest import LEAGUES, UNDERSTAT_LEAGUES, season_code
 from ratings import DixonColes, markets, outcome_probs, score_matrix
-from simulate import (GOAL_INTENSITY, ZONES, DEFAULT_ZONES, betting_backtest, simulate_season,
+from simulate import (GOAL_INTENSITY, ZONES, ZONE_LABELS, DEFAULT_ZONES, betting_backtest, simulate_season,
                       simulate_timeline, standings)
 
-MODEL_VERSION = "dc-xg0.5-xi0.003"
+MODEL_VERSION = "dc-xg0.5-xi0.003-joint"
 XG_WEIGHT = 0.5
-BACKTEST_FILE = "dc_xg0.5_xi0.003.csv.gz"
+BACKTEST_FILE = "dc_xg0.5_xi0.003_joint.csv.gz"
 FLAGS = {"E": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "SP": "🇪🇸", "D": "🇩🇪", "I": "🇮🇹", "F": "🇫🇷", "N": "🇳🇱", "P": "🇵🇹"}
 
 
@@ -63,6 +63,7 @@ class Engine:
                 "season": self.season, "played": len(current),
                 "has_xg": code in UNDERSTAT_LEAGUES,
                 "has_fixtures": not self.fixtures(code).empty,
+                "has_forecast": len(current) > 0,
                 "last_match": current["date"].max().strftime("%Y-%m-%d") if len(current) else None,
             })
         return out
@@ -70,9 +71,28 @@ class Engine:
     def fixtures(self, league: str) -> pd.DataFrame:
         return self.all_fixtures[self.all_fixtures["league"] == league]
 
+    def remaining(self, league: str) -> pd.DataFrame:
+        """Matches left this season. The published calendar when there is one; otherwise
+        every home/away pairing not played yet, which is exactly the rest of a double
+        round-robin (checked against the real calendars of SP1, E0, N1 and E1: identical).
+        No dates then, which the season simulator doesn't need."""
+        published = self.fixtures(league)
+        if not published.empty:
+            return published
+        cur = self.current(league)
+        teams = sorted(set(cur["home"]) | set(cur["away"]))
+        played = set(zip(cur["home"], cur["away"]))
+        pairs = [(h, a) for h in teams for a in teams if h != a and (h, a) not in played]
+        return pd.DataFrame(pairs, columns=["home", "away"]).assign(date=pd.NaT)
+
     def model(self, league: str) -> DixonColes:
         if league not in self._models:
-            self._models[league] = DixonColes(xg_weight=XG_WEIGHT).fit(self._league(league))
+            # First divisions are fitted with their second (measured in backtest.py --joint:
+            # 0.9786 vs 0.9793 log loss), so promoted teams arrive with a real rating.
+            fit_on = self._league(league)
+            if league in COMPANION:
+                fit_on = self.matches[self.matches["league"].isin([league, COMPANION[league]])]
+            self._models[league] = DixonColes(xg_weight=XG_WEIGHT).fit(fit_on, primary=league)
         return self._models[league]
 
     def current(self, league: str) -> pd.DataFrame:
@@ -127,7 +147,8 @@ class Engine:
         dc = self.model(league)
         lh, la = dc.lambdas(home, away, neutral)
         m = score_matrix(lh, la, dc.rho)
-        ratings = dc.ratings().set_index("team")
+        ratings = dc.ratings()
+        ratings = ratings[ratings["team"].isin(self.teams(league))].set_index("team")
         side = lambda t: ({"attack": round(float(ratings.at[t, "attack"]), 3),
                            "defense": round(float(ratings.at[t, "defense"]), 3),
                            "net": round(float(ratings.at[t, "net"]), 3),
@@ -201,15 +222,16 @@ class Engine:
     def forecast(self, league: str, sims: int = 10_000) -> dict:
         key = (league, sims)
         if key not in self._forecasts:
-            remaining = self.fixtures(league)
-            if remaining.empty:
-                raise LookupError(f"sin calendario pendiente para {league}")
+            remaining = self.remaining(league)
+            if self.current(league).empty:
+                raise LookupError(f"{league}: la temporada aún no ha empezado")
             f = simulate_season(self.model(league), self.current(league), remaining, sims, seed=0,
                                 zones=ZONES.get(league, DEFAULT_ZONES))
             title, europe, relegated = ZONES.get(league, DEFAULT_ZONES)
             self._forecasts[key] = {
                 "league": league, "season": self.season, "sims": f.n_sims, "remaining": f.remaining,
-                "zones": {"title": title, "europe": europe, "relegation": relegated},
+                "zones": {"title": title, "europe": europe, "relegation": relegated,
+                          "top_label": ZONE_LABELS.get(league, "Champions")},
                 "table": f.table.round(4).to_dict(orient="records"),
                 "positions": {team: [round(float(p), 4) for p in row]
                               for team, row in f.positions.iterrows()},

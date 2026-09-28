@@ -15,6 +15,10 @@ What makes this better than averaging goals per team:
     for estimating how good a team is; the Poisson likelihood accepts non-integer targets.
   - A ridge prior pulls attack/defense towards the league average, so a promoted team
     with five matches doesn't get an absurd rating.
+  - Several divisions can be fitted together (`primary` + a `league` column): each
+    division gets its own goal rate and home advantage, and the teams that go up and
+    down put everyone on one scale. A promoted team then arrives with a real rating
+    instead of "average".
 """
 
 from dataclasses import dataclass, field
@@ -42,12 +46,17 @@ class DixonColes:
     rho: float = -0.05
     as_of: pd.Timestamp | None = None
     n_matches: int = 0
+    division_offsets: dict[str, tuple[float, float]] = field(default_factory=dict)
 
     # ── fitting ────────────────────────────────────────────────────────────────
 
-    def fit(self, matches: pd.DataFrame, as_of: pd.Timestamp | None = None) -> "DixonColes":
+    def fit(self, matches: pd.DataFrame, as_of: pd.Timestamp | None = None,
+            primary: str | None = None) -> "DixonColes":
         """`matches`: date, home, away, fthg, ftag and optionally xg_home/xg_away.
-        Only matches strictly before `as_of` are used (default: all)."""
+        Only matches strictly before `as_of` are used (default: all).
+
+        With `primary` and a `league` column holding more than one division, `mu` and
+        `home_adv` are those of `primary`, and the other divisions get offsets."""
         df = matches.dropna(subset=["fthg", "ftag"])
         as_of = pd.Timestamp(as_of) if as_of is not None else df["date"].max() + pd.Timedelta(days=1)
         days = (as_of - df["date"]).dt.days.to_numpy()
@@ -75,10 +84,21 @@ class DixonColes:
         n = len(self.teams)
         inv_var = 1.0 / self.prior_sd ** 2
 
+        # Division offsets: group 0 is the primary division (offset fixed at 0).
+        others: list[str] = []
+        gi = np.zeros(len(df), dtype=int)
+        if primary is not None and "league" in df and df["league"].nunique() > 1:
+            others = sorted(set(df["league"]) - {primary})
+            gi = df["league"].map({primary: 0, **{g: k + 1 for k, g in enumerate(others)}}).to_numpy()
+        n_off = len(others)
+        o = 2 + 2 * n                                   # offsets start here: mu_off, then home_off
+
         def nll(theta: np.ndarray) -> tuple[float, np.ndarray]:
-            mu, home, att, dfn = theta[0], theta[1], theta[2:2 + n], theta[2 + n:]
-            lh = np.exp(mu + home + att[hi] + dfn[ai])
-            la = np.exp(mu + att[ai] + dfn[hi])
+            mu, home, att, dfn = theta[0], theta[1], theta[2:2 + n], theta[2 + n:o]
+            mu_g = np.concatenate([[0.0], theta[o:o + n_off]])[gi]
+            home_g = np.concatenate([[0.0], theta[o + n_off:]])[gi]
+            lh = np.exp(mu + mu_g + home + home_g + att[hi] + dfn[ai])
+            la = np.exp(mu + mu_g + att[ai] + dfn[hi])
             rh, ra = weight * (th - lh), weight * (ta - la)       # d ll / d log λ
             ll = np.sum(weight * (th * np.log(lh) - lh + ta * np.log(la) - la))
             penalty = 0.5 * inv_var * (att @ att + dfn @ dfn)
@@ -86,19 +106,26 @@ class DixonColes:
             grad[0] = rh.sum() + ra.sum()
             grad[1] = rh.sum()
             grad[2:2 + n] = np.bincount(hi, rh, n) + np.bincount(ai, ra, n) - inv_var * att
-            grad[2 + n:] = np.bincount(ai, rh, n) + np.bincount(hi, ra, n) - inv_var * dfn
+            grad[2 + n:o] = np.bincount(ai, rh, n) + np.bincount(hi, ra, n) - inv_var * dfn
+            if n_off:
+                grad[o:o + n_off] = np.bincount(gi, rh + ra, n_off + 1)[1:]
+                grad[o + n_off:] = np.bincount(gi, rh, n_off + 1)[1:]
             return -(ll - penalty), -grad
 
-        theta0 = np.zeros(2 + 2 * n)
+        theta0 = np.zeros(o + 2 * n_off)
         theta0[0] = np.log(max((th.mean() + ta.mean()) / 2, 0.1))
         theta0[1] = 0.25
         result = minimize(nll, theta0, jac=True, method="L-BFGS-B")
         self.mu, self.home_adv = float(result.x[0]), float(result.x[1])
-        self.attack, self.defense = result.x[2:2 + n], result.x[2 + n:]
+        self.attack, self.defense = result.x[2:2 + n], result.x[2 + n:o]
+        self.division_offsets = {g: (float(result.x[o + k]), float(result.x[o + n_off + k]))
+                                 for k, g in enumerate(others)}
 
         # ρ only makes sense on real scorelines, so it's fitted on goals, not on xG.
-        lh = np.exp(self.mu + self.home_adv + self.attack[hi] + self.defense[ai])
-        la = np.exp(self.mu + self.attack[ai] + self.defense[hi])
+        mu_g = np.concatenate([[0.0], result.x[o:o + n_off]])[gi]
+        home_g = np.concatenate([[0.0], result.x[o + n_off:]])[gi]
+        lh = np.exp(self.mu + mu_g + self.home_adv + home_g + self.attack[hi] + self.defense[ai])
+        la = np.exp(self.mu + mu_g + self.attack[ai] + self.defense[hi])
 
         def rho_nll(rho: float) -> float:
             return -np.sum(weight * np.log(np.maximum(_tau(gh, ga, lh, la, rho), 1e-10)))
