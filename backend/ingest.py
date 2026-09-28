@@ -133,6 +133,13 @@ def parse_football_data(body: bytes, league: str, season: str) -> pd.DataFrame:
     for column, candidates in FD_COLUMNS.items():
         source = next((c for c in candidates if c in raw.columns), None)
         out[column] = pd.to_numeric(raw[source], errors="coerce") if source else pd.NA
+    # A few old rows carry impossible odds (a draw at 1.29 next to 3.18 and 12.67): a
+    # margin below 0 % or above 15 % is a typo in the source, not a price (the audit found
+    # 26 such rows in 95k; real margins are 2-10 %). Dropped.
+    for prefix in ("b365", "avg", "pin", "close"):
+        cols = [f"{prefix}_{s}" for s in "hda"]
+        margin = (1 / out[cols].apply(pd.to_numeric, errors="coerce")).sum(axis=1, min_count=3) - 1
+        out.loc[(margin < 0) | (margin > 0.15), cols] = pd.NA
     out = out.dropna(subset=["date", "fthg", "ftag"])
     out = out[(out["home"] != "nan") & (out["away"] != "nan")]
     out["xg_source"] = pd.Series(
@@ -195,6 +202,26 @@ def build_team_map(fd: pd.DataFrame, us: pd.DataFrame, min_votes: int = 3) -> di
     # One-to-one: if two understat names claim the same football-data team, drop both.
     claimed = Counter(mapping.values())
     return {k: v for k, v in mapping.items() if claimed[v] == 1}
+
+
+def flag_disputed(fd: pd.DataFrame, us: pd.DataFrame, mapping: dict[str, str]) -> pd.DataFrame:
+    """Mark matches whose result the two sources disagree on (same teams within a day,
+    either way round, different score or home/away swapped). Checked on 21,839 matches:
+    3 disagreements, two of them results awarded off the pitch."""
+    us = us.assign(home=us["home_us"].map(mapping), away=us["away_us"].map(mapping)).dropna(subset=["home", "away"])
+    seen = {}
+    for u in us.itertuples(index=False):
+        for k in (-1, 0, 1):
+            day = (pd.Timestamp(u.date) + pd.Timedelta(days=k)).strftime("%Y-%m-%d")
+            seen[(u.home, u.away, day)] = (u.gh, u.ga)
+            seen[(u.away, u.home, day)] = ("swapped", u.gh, u.ga)
+    fd = fd.copy()
+    disputed = []
+    for r in fd.itertuples(index=False):
+        hit = seen.get((r.home, r.away, r.date))
+        disputed.append(int(hit is not None and (hit[0] == "swapped" or hit != (r.fthg, r.ftag))))
+    fd["disputed"] = disputed
+    return fd
 
 
 def attach_xg(fd: pd.DataFrame, us: pd.DataFrame, mapping: dict[str, str]) -> tuple[pd.DataFrame, int]:
@@ -320,6 +347,7 @@ def ingest_season(conn, league: str, season: str, current: bool, refresh: bool,
             # earlier seasons fill the gap (the fresh vote wins where both exist).
             mapping = {**store.team_map(conn, league), **build_team_map(fd, us)}
             fd, matched = attach_xg(fd, us, mapping)
+            fd = flag_disputed(fd, us, mapping)
             unmapped = sorted(set(us["home_us"]) - set(mapping))
             if unmapped:
                 note = f"sin mapear: {', '.join(unmapped)}"

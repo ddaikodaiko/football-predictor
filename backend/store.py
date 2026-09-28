@@ -40,6 +40,9 @@ MATCH_COLUMNS = {
     # Asian handicap (line for the home side): pre-match market average, and closing.
     "ah_line": "REAL", "ah_avg_h": "REAL", "ah_avg_a": "REAL",
     "ah_close_line": "REAL", "ah_close_h": "REAL", "ah_close_a": "REAL",
+    # 1 when the sources disagree on the result (awarded matches like Union Berlin-Bochum
+    # 2024, or plain contradictions): kept in the table, left out of the model's fit.
+    "disputed": "INTEGER",
 }
 
 SCHEMA = f"""

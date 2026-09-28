@@ -58,6 +58,8 @@ class DixonColes:
         With `primary` and a `league` column holding more than one division, `mu` and
         `home_adv` are those of `primary`, and the other divisions get offsets."""
         df = matches.dropna(subset=["fthg", "ftag"])
+        if "disputed" in df:
+            df = df[df["disputed"].fillna(0) == 0]      # results the sources disagree on
         as_of = pd.Timestamp(as_of) if as_of is not None else df["date"].max() + pd.Timedelta(days=1)
         days = (as_of - df["date"]).dt.days.to_numpy()
         keep = (days > 0) & (days <= self.max_days)

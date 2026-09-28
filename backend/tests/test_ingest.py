@@ -89,3 +89,22 @@ def test_store_replaces_a_season_atomically(tmp_path):
     assert store.replace_season(conn, "SP1", "2425", rows.iloc[:1]) == 1
     df = store.load_matches(conn, ["SP1"])
     assert len(df) == 1 and df["date"].dtype.kind == "M"
+
+
+def test_disputed_results_are_flagged():
+    fd = _fd([("2024-12-14", "Union Berlin", "Bochum", 0, 2), ("2024-12-15", "Bayern", "Leipzig", 2, 1),
+              ("2026-08-23", "Rennes", "Paris SG", 2, 2)])
+    us = pd.DataFrame([("2024-12-14", "Union Berlin", "Bochum", 1, 1, 1.2, 0.8),       # awarded 0-2
+                       ("2024-12-15", "Bayern", "Leipzig", 2, 1, 2.0, 1.0),
+                       ("2026-08-23", "Paris SG", "Rennes", 0, 0, 1.0, 0.5)],        # swapped
+                      columns=["date", "home_us", "away_us", "gh", "ga", "xg_home", "xg_away"])
+    out = ingest.flag_disputed(fd, us, {t: t for t in ["Union Berlin", "Bochum", "Bayern", "Leipzig", "Paris SG", "Rennes"]})
+    assert list(out["disputed"]) == [1, 0, 1]
+
+
+def test_impossible_odds_are_dropped():
+    body = ("Div,Date,HomeTeam,AwayTeam,FTHG,FTAG,AvgH,AvgD,AvgA\n"
+            "I1,20/09/09,Bologna,Catania,1,1,3.18,1.29,12.67\n"
+            "I1,20/09/09,Inter,Milan,2,0,2.0,3.4,4.0\n").encode()
+    df = ingest.parse_football_data(body, "I1", "0910")
+    assert pd.isna(df.iloc[0]["avg_h"]) and df.iloc[1]["avg_h"] == 2.0
