@@ -7,9 +7,9 @@
 | 1. Datos | SQLite local (`backend/store.py`) + ingesta (`backend/ingest.py`) | **hecho** |
 | 2. Modelo honesto | Dixon-Coles por máxima verosimilitud (`ratings.py`) + backtest walk-forward contra el mercado (`backtest.py`) | **hecho** |
 | 3. Simuladores | temporada, partido minuto a minuto y apuestas (`simulate.py`) | **hecho** (falta torneos) |
-| 4. API | conectar `api.py` a la base local y a los simuladores | pendiente |
-| 5. UI | varias páginas, gráficos, simulador visual | pendiente |
-| 6. Publicar | README con resultados, capturas, despliegue | pendiente |
+| 4. API | `api.py` + `engine.py` sobre la base local; arranca en ~2,5 s | **hecho** |
+| 5. UI | partidos, liga (pronóstico, clasificación, fuerzas), partido (simulador y directo), modelo, directo | **hecho** |
+| 6. Publicar | README con resultados hecho; faltan capturas y despliegue | pendiente |
 
 ## Datos
 
@@ -64,18 +64,13 @@ medir con el mismo backtest antes de nada.
 
 ## Pendiente
 
-- [ ] **API**: que `api.py` lea de la base local (arranque en segundos) y exponga el
-      Dixon-Coles, la temporada simulada, el partido minuto a minuto y el backtest.
-- [ ] **UI**: páginas separadas (partido, liga, simulador, backtest), gráficos de
-      probabilidades, tabla de posiciones probable, partido animado.
+- [ ] **Capturas** para el README y **despliegue** (necesita un sitio para la API Python y la base de ~90 MB).
 - [ ] **Torneos** (Champions): necesita un rating común entre ligas. ClubElo
       (api.clubelo.com) lo da gratis, pero el 28-09-2026 devolvía 502.
 - [ ] **Bajas y alineaciones**: no hay fuente gratuita fiable sin clave. API-Football
       (100 peticiones/día gratis) es la opción; hace falta registrarse.
-- [ ] Guardar las predicciones reales antes de cada jornada (tabla `predictions` ya creada)
-      para medir el modelo en vivo, no solo en backtest.
-- [ ] Sustituir el ensemble antiguo de `model.py` (usa las cuotas como variable, así que
-      no puede compararse con el mercado) o medirlo con el mismo backtest.
+- [ ] Puntuar las predicciones guardadas (tabla `predictions`, se llenan al pedir próximos
+      partidos) cuando se jueguen, y enseñarlo en la web: el modelo medido en vivo.
 
 ## Módulo de ejecución (idea de 2026-06-10, en suspenso)
 

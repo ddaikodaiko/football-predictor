@@ -6,7 +6,7 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 # ── Backend ──────────────────────────────────────────────────
 echo "▶ Arrancando backend (FastAPI :8000)..."
 cd "$ROOT/backend"
-python3 -m uvicorn api:app --host 0.0.0.0 --port 8000 &
+"$ROOT/.venv/bin/python" -m uvicorn api:app --host 0.0.0.0 --port 8000 &
 BACKEND_PID=$!
 
 # ── Frontend ─────────────────────────────────────────────────

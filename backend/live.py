@@ -6,6 +6,7 @@ the model use.
 """
 
 import os
+import time
 from datetime import date, datetime
 
 import requests
@@ -128,50 +129,52 @@ TEAM_NAME_MAP: dict[str, str] = {
 }
 
 
+_cache: dict = {"at": 0.0, "value": None}
+STARTED = {"IN_PLAY", "LIVE", "PAUSED", "HALFTIME", "FINISHED"}
+CACHE_S = 30  # free tier allows 10 requests/minute; the page polls every 60 s
+
+
 def live_matches() -> dict:
-    """Live/today's in-play matches with real score and minute from football-data.org."""
+    """Today's matches of the big five with score and minute, from football-data.org.
+
+    One request for all five competitions (the per-competition loop took ~9 s), cached
+    for 30 s so several open tabs don't burn the free quota.
+    """
     if not FOOTBALL_DATA_KEY:
         return {"matches": [], "source": "no_key", "ts": datetime.now().isoformat()}
+    if _cache["value"] is not None and time.time() - _cache["at"] < CACHE_S:
+        return _cache["value"]
 
-    headers = {"X-Auth-Token": FOOTBALL_DATA_KEY}
     today = date.today().isoformat()
-    all_live: list[dict] = []
+    try:
+        resp = requests.get(
+            f"{FOOTBALL_DATA_ORG}/matches",
+            # No `status` filter: the API rejects HALFTIME in it (400), which silently broke
+            # the old per-competition version. Filtered below instead.
+            params={"competitions": ",".join(COMP_TO_LEAGUE), "dateFrom": today, "dateTo": today},
+            headers={"X-Auth-Token": FOOTBALL_DATA_KEY}, timeout=8,
+        )
+        resp.raise_for_status()
+        raw = resp.json().get("matches", [])
+    except (requests.RequestException, ValueError):
+        return {"matches": [], "source": "error", "ts": datetime.now().isoformat()}
 
-    for comp_code, league_code in COMP_TO_LEAGUE.items():
-        try:
-            resp = requests.get(
-                f"{FOOTBALL_DATA_ORG}/competitions/{comp_code}/matches",
-                params={"status": "IN_PLAY,PAUSED,HALFTIME,FINISHED", "dateFrom": today, "dateTo": today},
-                headers=headers,
-                timeout=8,
-            )
-            if resp.status_code != 200:
-                continue
-            for m in resp.json().get("matches", []):
-                home_raw = m["homeTeam"]["name"]
-                away_raw = m["awayTeam"]["name"]
-                home = TEAM_NAME_MAP.get(home_raw, home_raw)
-                away = TEAM_NAME_MAP.get(away_raw, away_raw)
-                score = m.get("score", {})
-                ft = score.get("fullTime", {})
-                ht_score = score.get("halfTime", {})
-                status_val = m.get("status", "")
-                minute = m.get("minute")
-                if minute is None and status_val == "HALFTIME":
-                    minute = 45
-                all_live.append({
-                    "id": m["id"],
-                    "home": home,
-                    "away": away,
-                    "league": league_code,
-                    "status": status_val,
-                    "minute": minute,
-                    "score_home": ft.get("home") or 0,
-                    "score_away": ft.get("away") or 0,
-                    "ht_home": ht_score.get("home"),
-                    "ht_away": ht_score.get("away"),
-                })
-        except Exception:
+    matches = []
+    for m in raw:
+        league = COMP_TO_LEAGUE.get(m.get("competition", {}).get("code", ""))
+        status = m.get("status", "")
+        if league is None or status not in STARTED:
             continue
-
-    return {"matches": all_live, "ts": datetime.now().isoformat()}
+        ft = m.get("score", {}).get("fullTime", {})
+        minute = m.get("minute")
+        if minute is None and status in ("HALFTIME", "PAUSED"):
+            minute = 45
+        matches.append({
+            "id": m["id"], "league": league, "status": status, "minute": minute,
+            "home": TEAM_NAME_MAP.get(m["homeTeam"]["name"], m["homeTeam"]["name"]),
+            "away": TEAM_NAME_MAP.get(m["awayTeam"]["name"], m["awayTeam"]["name"]),
+            "score_home": ft.get("home") or 0, "score_away": ft.get("away") or 0,
+        })
+    value = {"matches": matches, "ts": datetime.now().isoformat()}
+    _cache.update(at=time.time(), value=value)
+    return value

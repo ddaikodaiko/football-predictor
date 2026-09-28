@@ -233,7 +233,7 @@ class Engine:
         return summary
 
     def _summarise_backtest(self, path) -> dict:
-        pred = pd.read_csv(path, parse_dates=["date"])
+        pred = pd.read_csv(path, parse_dates=["date"], dtype={"season": str})
         y = outcome_index(pred)
         model_p = pred[["p_home", "p_draw", "p_away"]].to_numpy()
         market_p, _ = market_probs(pred)

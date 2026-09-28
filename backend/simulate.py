@@ -213,7 +213,7 @@ def main() -> int:
         cols = ["team", "pts_actual", "pts_esperados", "p_campeon", "p_champions", "p_descenso"]
         print(f.table[cols].round(3).to_string(index=False))
     else:
-        pred = pd.read_csv(args.predictions, parse_dates=["date"])
+        pred = pd.read_csv(args.predictions, parse_dates=["date"], dtype={"season": str})
         r = betting_backtest(pred, args.edge, args.stake, odds_prefix=args.odds)
         if not r["bets"]:
             print("ninguna apuesta con ese margen")

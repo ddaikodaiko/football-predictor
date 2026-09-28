@@ -1,190 +1,117 @@
-const BASE = 'http://localhost:8000';
+import { env } from '$env/dynamic/public';
 
-export type MatchStats = {
-  avg_GF: number; avg_GA: number; avg_SoT: number; avg_Pts: number;
-  avg_GF_h?: number | null; avg_GA_h?: number | null;
-  avg_GF_a?: number | null; avg_GA_a?: number | null;
-  avg_shots?: number | null;
-  avg_corners?: number | null;
-  form?: string[];
-  streak?: number;
+const BASE = env.PUBLIC_API_URL ?? 'http://localhost:8000';
+
+type Fetch = typeof fetch;
+
+export type League = {
+  code: string; name: string; flag: string; tier: 1 | 2; season: string;
+  played: number; has_xg: boolean; has_fixtures: boolean; last_match: string | null;
 };
 
-export type H2H = {
-  h2h_home_win_pct: number; h2h_draw_pct: number; h2h_away_win_pct: number;
-  h2h_avg_goals_home: number; h2h_avg_goals_away: number;
+export type TableRow = {
+  position: number; team: string; pj: number; pts: number; gf: number; ga: number; gd: number;
+  form: ('W' | 'D' | 'L')[];
 };
 
-export type Bookmaker = {
-  p_home: number | null; p_draw: number | null; p_away: number | null;
+export type Rating = { team: string; attack: number; defense: number; xgf: number; xga: number; net: number };
+
+export type Fixture = {
+  date: string; home: string; away: string;
+  p_home: number; p_draw: number; p_away: number; lambda_home: number; lambda_away: number;
 };
 
-export type Polymarket = {
-  question: string; prices: number[]; outcomes: string[];
-  liquidity: number; volume_24h: number;
-} | null;
-
-export type SimScore = { score: string; prob: number };
-
-export type HtFtEntry = { combo: string; label: string; prob: number };
-
-export type Simulation = {
-  lambda_home: number; lambda_away: number;
-  p_home: number; p_draw: number; p_away: number;
-  over25: number; over15: number; over35: number; btts: number;
-  cs_home: number; cs_away: number;
-  dnb_home: number; dnb_away: number;
-  ah_plus_half_home: number; ah_plus_half_away: number;
-  htft: Record<string, number>;
-  htft_top: HtFtEntry[];
-  top_scores: SimScore[];
-} | null;
-
-export type InplaySimulation = {
-  lambda_home_remaining: number; lambda_away_remaining: number;
-  lambda_home_full: number; lambda_away_full: number;
-  p_home: number; p_draw: number; p_away: number;
-  over25: number; over15: number; over35: number; btts: number;
-  cs_home: number; cs_away: number;
-  dnb_home: number; dnb_away: number;
-  top_scores: SimScore[];
-  current_score: string; minute: number; remaining_minutes: number;
+export type ForecastRow = {
+  team: string; pts_actual: number; pts_esperados: number; gd_esperada: number; posicion_media: number;
+  p_campeon: number; p_champions: number; p_descenso: number;
 };
 
-export type ValueBet = { outcome: string; edge: number; ml_p: number; bk_p: number };
-
-export type Analysis = {
-  verdict: string; confidence: string; confidence_pct: number;
-  elo_favors: string; elo_diff: number; key_factors: string[];
-  value_bets: ValueBet[];
-  has_value: boolean;
+export type Forecast = {
+  league: string; season: string; sims: number; remaining: number;
+  zones: { title: number; europe: number; relegation: number };
+  table: ForecastRow[]; positions: Record<string, number[]>;
 };
+
+export type FormGame = {
+  date: string; opponent: string; home: boolean; gf: number; ga: number;
+  result: 'W' | 'D' | 'L'; xgf: number | null; xga: number | null;
+};
+
+export type SideRating = { attack: number; defense: number; net: number; rank: number } | null;
 
 export type Prediction = {
-  home: string; away: string;
-  home_league: string; away_league: string;
+  league: string; home: string; away: string; model: string; fitted_on: number;
+  known: { home: boolean; away: boolean };
+  lambda_home: number; lambda_away: number;
   p_home: number; p_draw: number; p_away: number;
-  elo_home: number; elo_away: number; elo_exp_home: number;
-  home_stats: MatchStats; away_stats: MatchStats;
-  h2h: H2H;
-  bookmaker: Bookmaker; polymarket: Polymarket;
-  simulation: Simulation;
-  analysis: Analysis;
-  claude_analysis?: string | null;
-  cross_league: boolean; error?: string | null;
-  inplay_simulation?: InplaySimulation | null;
-  inplay_score?: { home: number; away: number } | null;
-  inplay_minute?: number | null;
+  over15: number; over25: number; over35: number; btts: number; cs_home: number; cs_away: number;
+  top_scores: { score: string; prob: number }[];
+  score_matrix: number[][];
+  ratings: { home: SideRating; away: SideRating };
+  form: { home: FormGame[]; away: FormGame[] };
+  h2h: { date: string; home: string; away: string; fthg: number; ftag: number }[];
 };
 
-export type EloEntry = { team: string; elo: number };
-
-export type StatusResponse = {
-  ready: boolean;
-  meta: {
-    total_matches: number; train_matches: number; test_matches: number;
-    accuracy: number; log_loss: number; leagues: string[]; seasons: string[];
-    features: number;
-  };
+export type Inplay = {
+  minute: number; score: [number, number]; remaining_share: number;
+  lambda_home_left: number; lambda_away_left: number;
+  p_home: number; p_draw: number; p_away: number; over25: number;
+  top_scores: { score: string; prob: number }[];
 };
 
-export type MatchFixture = {
-  home: string; away: string;
-  home_league: string; away_league: string;
-  b365h?: number; b365d?: number; b365a?: number;
-};
+export type Timeline = { home: string; away: string; score: [number, number]; goals: { side: 'home' | 'away'; minute: number }[] };
 
-export type Matchday = {
-  id: string; label: string; date: string;
-  matches: MatchFixture[];
-  live?: boolean;
-};
+export type Scores = { n: number; log_loss: number; brier: number; rps: number; accuracy: number };
 
-export type FeatureImportanceEntry = { feature: string; importance: number };
+export type Backtest = {
+  available: boolean; how?: string; model: string; matches: number; from: string; to: string;
+  overall: { model: Scores; market: Scores; base: Scores };
+  by_league: { league: string; partidos: number; logloss_modelo: number; logloss_mercado: number; logloss_base: number; acierto_modelo: number; acierto_mercado: number }[];
+  by_season: { season: string; n: number; model: number; market: number }[];
+  reliability: { bin: string; n: number; predicted: number; observed: number }[];
+  betting: { edge: number; bets: number; roi: number | null; profit: number | null; clv_positive: number | null; curve: number[] }[];
+  bet_everything_roi: number;
+};
 
 export type LiveMatch = {
-  id: number;
-  home: string;
-  away: string;
-  league: string;
-  status: 'IN_PLAY' | 'HALFTIME' | 'PAUSED' | 'FINISHED' | string;
-  minute: number | null;
-  score_home: number;
-  score_away: number;
-  ht_home: number | null;
-  ht_away: number | null;
+  id: number; home: string; away: string; league: string; status: string; minute: number | null;
+  score_home: number; score_away: number;
 };
 
-export async function getStatus(): Promise<StatusResponse> {
-  const r = await fetch(`${BASE}/api/status`);
+async function get<T>(f: Fetch, path: string): Promise<T> {
+  const r = await f(`${BASE}${path}`);
+  if (!r.ok) throw new Error((await r.json().catch(() => null))?.detail ?? `HTTP ${r.status}`);
   return r.json();
 }
 
-export async function predictMatch(params: MatchFixture): Promise<Prediction> {
-  const r = await fetch(`${BASE}/api/predict`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params),
+async function post<T>(f: Fetch, path: string, body: unknown): Promise<T> {
+  const r = await f(`${BASE}${path}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
   });
-  if (!r.ok) throw new Error(await r.text());
+  if (!r.ok) throw new Error((await r.json().catch(() => null))?.detail ?? `HTTP ${r.status}`);
   return r.json();
 }
 
-export async function predictBatch(matches: MatchFixture[]): Promise<Prediction[]> {
-  const r = await fetch(`${BASE}/api/predict/batch`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(matches),
-  });
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
-}
-
-export async function getMatchdays(): Promise<Matchday[]> {
-  const r = await fetch(`${BASE}/api/matchdays`);
-  const data = await r.json();
-  return data.matchdays;
-}
-
-export async function getUpcomingMatchdays(daysAhead = 7): Promise<{ matchdays: Matchday[]; error?: string }> {
-  const r = await fetch(`${BASE}/api/matchdays/upcoming?days_ahead=${daysAhead}`);
-  return r.json();
-}
-
-export async function getElo(n = 20): Promise<EloEntry[]> {
-  const r = await fetch(`${BASE}/api/elo?n=${n}`);
-  const data = await r.json();
-  return data.ranking;
-}
-
-export async function getTeams(): Promise<Record<string, string[]>> {
-  const r = await fetch(`${BASE}/api/teams`);
-  return r.json();
-}
-
-export async function getFeatureImportance(n = 15): Promise<FeatureImportanceEntry[]> {
-  const r = await fetch(`${BASE}/api/feature-importance?n=${n}`);
-  const data = await r.json();
-  return data.features;
-}
-
-export async function getLiveMatches(): Promise<{ matches: LiveMatch[]; ts: string; source?: string }> {
-  const r = await fetch(`${BASE}/api/live`);
-  return r.json();
-}
-
-export type InplayRequest = {
-  home: string; away: string;
-  home_league: string; away_league: string;
-  score_home: number; score_away: number; minute: number;
+export const api = {
+  leagues: (f: Fetch = fetch) => get<League[]>(f, '/api/leagues'),
+  table: (code: string, f: Fetch = fetch) => get<TableRow[]>(f, `/api/leagues/${code}/table`),
+  ratings: (code: string, f: Fetch = fetch) => get<Rating[]>(f, `/api/leagues/${code}/ratings`),
+  teams: (code: string, f: Fetch = fetch) => get<string[]>(f, `/api/leagues/${code}/teams`),
+  fixtures: (code: string, limit = 10, f: Fetch = fetch) => get<Fixture[]>(f, `/api/leagues/${code}/fixtures?limit=${limit}`),
+  forecast: (code: string, f: Fetch = fetch) => get<Forecast>(f, `/api/leagues/${code}/forecast`),
+  predict: (league: string, home: string, away: string, f: Fetch = fetch) =>
+    post<Prediction>(f, '/api/predict', { league, home, away }),
+  inplay: (league: string, home: string, away: string, score_home: number, score_away: number, minute: number) =>
+    post<Inplay>(fetch, '/api/predict/inplay', { league, home, away, score_home, score_away, minute }),
+  timeline: (league: string, home: string, away: string, seed?: number) =>
+    post<Timeline>(fetch, '/api/simulate/match', { league, home, away, seed }),
+  backtest: (f: Fetch = fetch) => get<Backtest>(f, '/api/backtest'),
+  live: (f: Fetch = fetch) => get<{ matches: LiveMatch[]; source?: string }>(f, '/api/live'),
 };
 
-export async function predictInplay(params: InplayRequest): Promise<Prediction> {
-  const r = await fetch(`${BASE}/api/predict/inplay`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params),
-  });
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
+export const BIG_FIVE = ['E0', 'SP1', 'D1', 'I1', 'F1'];
+
+export function matchHref(league: string, home: string, away: string): string {
+  const q = new URLSearchParams({ liga: league, local: home, visitante: away });
+  return `/partido?${q}`;
 }
