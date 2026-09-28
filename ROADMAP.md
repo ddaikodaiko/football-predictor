@@ -99,6 +99,26 @@ bajas antes que el mercado, y cuotas de apertura (las que se corrigen después).
 públicos, el techo realista es lo que hay: probabilidades al ~85 % del mercado y bien
 calibradas.
 
+## Con cuentas (28-09-2026): The Odds API y API-Football
+
+**Detector de valor en vivo** (`backend/odds_live.py`, página *Valor*). The Odds API trae
+~19 casas con Pinnacle y el exchange de Betfair para las 12 ligas. Cada consulta se guarda
+(el camino entero de cada cuota hasta el cierre); la probabilidad justa sale de Pinnacle
+sin margen por el **método de potencia** (el proporcional sobrevalora a los tapados:
+medido en cierres, 13,74 % contra 13,05 % real; potencia 13,46 %). Cada precio con valor
+se registra y se puntúa contra el cierre: es la única prueba de ventaja que vale. Primera
+consulta: 59 precios con valor a 12 días vista. **El CLV aún no se puede medir**: hacen falta
+consultas cerca del partido. Presupuesto: 15 créditos por consulta de las 5 grandes;
+500 al mes dan para ~4 consultas por semana.
+
+**Bajas** (`backend/injuries.py`). API-Football gratis solo da 2022-2024, no la temporada
+actual. Experimento: importancia de cada baja con Understat de la temporada anterior
+(xG + xA; minutos de defensas y porteros), ajustando los goles esperados. 65 % de las bajas
+emparejadas (el resto, casi todo fichajes y canteranos). Resultado en 2024/25: log loss
+0,9782 → **0,9789** (peor) y ninguna ganancia frente al mercado. La lista de bajas
+anunciadas ya está en el precio: **no merece la pena pagar el plan de API-Football** para
+esto. Lo que podría servir es la alineación confirmada (1 h antes), que es otra cosa.
+
 ## Pendiente
 
 - [ ] **Capturas** para el README y **despliegue** (necesita un sitio para la API Python y la base de ~90 MB).
