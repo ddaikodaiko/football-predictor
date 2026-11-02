@@ -1,13 +1,15 @@
 # Football Predictor
 
-Probabilidades de partidos de fútbol con un modelo **Dixon-Coles con xG**, simulación de
-temporadas completas y un backtest honesto contra las casas de apuestas.
+Probabilidades de partidos de fútbol con un modelo **Dixon-Coles que aprende de los precios
+de los partidos ya jugados**, simulación de temporadas completas y un backtest honesto contra
+las casas de apuestas.
 
 - **95.000 partidos** de 12 ligas europeas desde 2005/06, con xG por partido de las cinco
   grandes desde 2014.
 - **Medido de verdad**: 10 temporadas, semana a semana, prediciendo cada jornada solo con el
-  pasado. El modelo cubre el **85 %** de la distancia entre no saber nada y la cuota de cierre
-  de Pinnacle, y está bien calibrado. **No le gana al mercado**, y el README lo dice.
+  pasado. El modelo cubre el **92,6 %** de la distancia entre no saber nada y la cuota de
+  cierre de Pinnacle (con goles y xG llegaba al 85 %), y está bien calibrado. **No le gana al
+  mercado**, y el README lo dice.
 - **Simuladores**: la temporada que queda (10.000 veces en medio segundo), un partido minuto
   a minuto y las probabilidades en directo según el marcador.
 
@@ -24,15 +26,21 @@ Walk-forward 2016/17 – 2025/26, cinco grandes ligas, 17.937 partidos. Log loss
 | | log loss | RPS |
 |---|---|---|
 | Sin modelo (frecuencias 1X2) | 1,0700 | — |
-| **Dixon-Coles, 50 % goles + 50 % xG** | **0,9793** | **0,1986** |
+| Dixon-Coles sobre goles y xG (50 % cada uno) | 0,9785 | 0,1985 |
+| **Dixon-Coles sobre los precios de los partidos ya jugados** | **0,9705** | **0,1961** |
 | Pinnacle, cuota de cierre | 0,9626 | 0,1937 |
 
-- **Calibración**: agrupando por la probabilidad del modelo, lo que dice que pasa el 25 % pasa
-  el 25,5 %, y así en todo el rango.
+- **Por qué precios**: una cuota ya sabe las bajas, las alineaciones y los fichajes, que es lo
+  que le faltaba al modelo de goles y xG. Cada precio de un partido jugado se convierte en los
+  goles esperados que lo reproducen, y el modelo aprende de ellos con una vida media de unas
+  tres semanas. Mejora en las 10 temporadas y en las 5 ligas; sumarle goles o xG ya no aporta.
+  El partido que se predice nunca ve su propio precio.
+- **Calibración**: agrupando por la probabilidad del modelo, lo que dice que pasa el 25,5 %
+  pasa el 25,9 %, y en ningún tramo con más de 1.000 casos se aparta más de 1,6 puntos.
 - **Apuestas**: apostar cuando el modelo ve valor, a cuota media previa al partido, pierde entre
-  un 11 % y un 14 % en 10 temporadas (apostar a todo pierde el 6 %, el margen de la casa). Solo
-  el 32 % de esas apuestas bate la cuota de cierre. La diferencia con el mercado es información
-  que el modelo no tiene: bajas, alineaciones, fichajes.
+  un 7,5 % y un 10 % en 10 temporadas (apostar a todo pierde el 6,4 %, el margen de la casa).
+  Lo que le queda al mercado es lo que se sabe la semana del partido: alineaciones y bajas de
+  última hora.
 
 Todo el detalle, con gráficos, en la página **El modelo** de la app.
 
@@ -40,7 +48,8 @@ Todo el detalle, con gráficos, en la página **El modelo** de la app.
 
 Con datos públicos el modelo no le gana al mercado en ningún sitio: medido en 12 ligas y
 tres mercados (1X2, goles, hándicap asiático) con valor esperado contra la cuota de cierre
-(`backend/edge.py`), y tampoco añadiendo las bajas de API-Football (`backend/injuries.py`).
+(`backend/edge.py`, con el modelo de goles y xG), tampoco añadiendo las bajas de API-Football
+(`backend/injuries.py`) y tampoco con el modelo de precios, que solo se acerca más.
 
 Lo que hacen los profesionales es otra cosa: tomar la casa más afilada (Pinnacle) como
 verdad y buscar casas que se quedan atrás. `backend/odds_live.py` lo hace en vivo con
@@ -56,17 +65,28 @@ queda registrado para puntuarlo contra el cierre. Consultas programadas con cron
    xG de [Understat](https://understat.com). Los nombres de equipo de las dos fuentes se
    emparejan **aprendiendo de los propios partidos** (mismo día, mismo marcador): 100 % de cruce.
    Todo queda en una SQLite local.
-2. **Modelo** (`backend/ratings.py`): cada equipo tiene ataque y defensa; los goles son
+2. **Precios** (`backend/market.py`): cada cuota de un partido jugado (1X2 y más/menos 2,5,
+   sin margen por el método de potencia) se convierte en los dos goles esperados que la
+   reproducen con el mismo Dixon-Coles: mínimos cuadrados sobre una rejilla de 700×700 pares,
+   los 95.000 partidos en medio segundo.
+3. **Modelo** (`backend/ratings.py`): cada equipo tiene ataque y defensa; los goles son
    Poisson con la corrección de Dixon & Coles (1997) para marcadores bajos. Se ajusta por máxima
-   verosimilitud con gradiente analítico sobre los últimos tres años, pesando más lo reciente
-   (vida media ~8 meses), mezclando goles y xG, y con un prior ridge para equipos con pocos
-   partidos. Un ajuste tarda 0,02 s.
-3. **Backtest** (`backend/backtest.py`): reajuste semanal solo con el pasado, comparado con las
+   verosimilitud con gradiente analítico sobre esos goles esperados, pesando más lo reciente
+   (vida media ~3 semanas: un precio caduca rápido), con las segundas divisiones en el mismo
+   ajuste para que los ascendidos lleguen con un rating real. Admite también goles y xG, cada
+   señal con su propio decaimiento: es el modelo de referencia sin mercado.
+4. **Backtest** (`backend/backtest.py`): reajuste semanal solo con el pasado, comparado con las
    probabilidades del mercado sin margen. Un test comprueba que cambiar un resultado futuro no
    altera ninguna predicción anterior.
-4. **Simuladores** (`backend/simulate.py`): temporada completa vectorizada con desempates por
+5. **Simuladores** (`backend/simulate.py`): temporada completa vectorizada con desempates por
    diferencia de goles, partido minuto a minuto y repetición de apuestas con CLV.
-5. **API** (`backend/api.py` + `engine.py`, FastAPI) y **web** (`frontend/`, SvelteKit 2 +
+6. **Córners y tiros a puerta** (`backend/props.py`): binomial negativa por equipo, a partir
+   de los goles esperados y de unos ratings Dixon-Coles ajustados sobre los propios córners y
+   tiros (el estilo: hay equipos que viven del córner). Medido sin mirar el futuro en 17.935
+   partidos: el combinado es mejor que cada parte por separado, y la probabilidad de cada línea
+   de total se aparta menos de 3 puntos de lo que pasó. Las mitades reparten el partido como
+   los goles: no hay datos por mitad para medirlo.
+7. **API** (`backend/api.py` + `engine.py`, FastAPI) y **web** (`frontend/`, SvelteKit 2 +
    Svelte 5, gráficos en SVG sin librerías).
 
 ## Arrancar
@@ -75,7 +95,9 @@ queda registrado para puntuarlo contra el cierre. Consultas programadas con cron
 python3 -m venv .venv && .venv/bin/pip install -r backend/requirements-dev.txt
 cd backend
 ../.venv/bin/python ingest.py                  # ~5 min la primera vez, luego usa la caché
-../.venv/bin/python backtest.py --xg 0.5       # ~1 min, alimenta la página "El modelo"
+../.venv/bin/python backtest.py --joint --xg 0 --market 1 --market-xi 0.03 --prior 10 --name dc_market
+                                               # ~2 min, alimenta la página "El modelo"
+../.venv/bin/python props.py                    # ~2 min, córners y tiros a puerta
 ../.venv/bin/python -m uvicorn api:app --port 8000
 
 cd ../frontend && bun install && bun run dev   # http://localhost:5173
@@ -88,7 +110,7 @@ Marcadores en directo: clave gratuita de [football-data.org](https://www.footbal
 `backend/.env` como `FOOTBALL_DATA_KEY=...`. Actualizar datos: `python ingest.py --refresh`
 y `POST /api/reload`.
 
-Tests: `cd backend && ../.venv/bin/python -m pytest -q` (34 tests, sin red).
+Tests: `cd backend && ../.venv/bin/python -m pytest -q` (48 tests, sin red).
 
 ## API
 

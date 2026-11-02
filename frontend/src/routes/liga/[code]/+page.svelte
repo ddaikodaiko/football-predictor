@@ -69,9 +69,9 @@
               <td><b>{r.team}</b></td>
               <td class="r">{r.pts_actual}</td>
               <td class="r"><b>{r.pts_esperados.toFixed(0)}</b></td>
-              <td class="r"><span class="cell" style="background: {heat(r.p_campeon, 1)}">{pct(r.p_campeon)}</span></td>
-              <td class="r"><span class="cell" style="background: {heat(r.p_champions, 1, '59,158,255')}">{pct(r.p_champions)}</span></td>
-              <td class="r"><span class="cell" style="background: {heat(r.p_descenso, 1, '232,69,69')}">{pct(r.p_descenso)}</span></td>
+              <td class="r"><span class="cell" style={heat(r.p_campeon, 1)}>{pct(r.p_campeon)}</span></td>
+              <td class="r"><span class="cell" style={heat(r.p_champions, 1, 'good')}>{pct(r.p_champions)}</span></td>
+              <td class="r"><span class="cell" style={heat(r.p_descenso, 1, 'bad')}>{pct(r.p_descenso)}</span></td>
             </tr>
           {/each}
         </tbody>
@@ -88,7 +88,7 @@
               <tr>
                 <th>{r.team}</th>
                 {#each f.positions[r.team] as p, k}
-                  <td style="background: {heat(p, posMax)}" title="{r.team} {k + 1}º: {pct(p, 1)}">{p >= 0.05 ? Math.round(p * 100) : ''}</td>
+                  <td style={heat(p, posMax)} title="{r.team} {k + 1}º: {pct(p, 1)}">{p >= 0.05 ? Math.round(p * 100) : ''}</td>
                 {/each}
               </tr>
             {/each}
@@ -123,15 +123,15 @@
           <tbody>
             {#each data.ratings as r}
               <tr><td><b>{r.team}</b></td><td class="r">{r.xgf.toFixed(2)}</td><td class="r">{r.xga.toFixed(2)}</td>
-                <td class="r"><b style="color: {r.net >= 0 ? 'var(--green)' : 'var(--red)'}">{signed(r.net)}</b></td></tr>
+                <td class="r"><b style="color: {r.net >= 0 ? 'var(--good)' : 'var(--bad)'}">{signed(r.net)}</b></td></tr>
             {/each}
           </tbody>
         </table>
       </div>
     </div>
     <p class="note intro">Goles que marcaría y encajaría cada equipo, por partido, contra un rival medio en campo
-      neutral. Salen del modelo Dixon-Coles: tienen en cuenta la fuerza de los rivales, pesan más los partidos
-      recientes y mezclan goles con xG.</p>
+      neutral. Salen del modelo Dixon-Coles sobre lo que el mercado esperaba de cada equipo en sus partidos ya
+      jugados: tienen en cuenta la fuerza de los rivales y pesan mucho los partidos recientes.</p>
   {:else if tab === 'fixtures'}
     <div class="card">
       {#each data.fixtures as m}
@@ -149,9 +149,9 @@
   select { background: var(--bg3); color: var(--text); border: 1px solid var(--border2); border-radius: 8px; padding: 8px 10px; }
   .intro { margin-bottom: 14px; }
   .cell { display: inline-block; min-width: 48px; padding: 2px 6px; border-radius: 4px; text-align: right; }
-  tr.z-title td:first-child { box-shadow: inset 3px 0 var(--green); }
-  tr.z-europe td:first-child { box-shadow: inset 3px 0 var(--blue); }
-  tr.z-rel td:first-child { box-shadow: inset 3px 0 var(--red); }
+  tr.z-title td:first-child { box-shadow: inset 3px 0 var(--accent); }
+  tr.z-europe td:first-child { box-shadow: inset 3px 0 var(--good); }
+  tr.z-rel td:first-child { box-shadow: inset 3px 0 var(--bad); }
   .positions { margin-top: 16px; }
   table.heat { border-collapse: separate; border-spacing: 2px; font-size: 11px; font-variant-numeric: tabular-nums; }
   table.heat th { color: var(--text3); font-weight: 600; padding: 0 4px; white-space: nowrap; text-align: right; }

@@ -8,6 +8,7 @@
   import ScoreHeatmap from '$lib/components/ScoreHeatmap.svelte';
   import { api, matchHref, type FormGame, type Inplay } from '$lib/api';
   import { dateWithYear, odds, pct, shortDate } from '$lib/format';
+  import { linesAround, periodMarkets, type Period } from '$lib/props';
 
   let { data } = $props();
   const p = $derived(data.prediction);
@@ -53,6 +54,18 @@
   ] : []);
   const moves = $derived(data.odds.points.filter((x) => x.fair));
 
+  // ── corners and shots on target ──
+  let stat = $state<'corners' | 'sot'>('corners');
+  let period = $state<Period>('match');
+  const STAT_LABEL = { corners: 'córners', sot: 'tiros a puerta' };
+  const PERIODS: [Period, string][] = [['match', 'Partido'], ['first', '1.ª parte'], ['second', '2.ª parte']];
+  const counts = $derived(p?.props ? periodMarkets(p.props[stat], period, p.props.first_half) : null);
+  const countRows = $derived(counts && p ? [
+    ...linesAround(counts.home + counts.away, 3).map((l) => ({ label: `Total: más de ${l.toLocaleString('es')}`, p: counts.overTotal(l) })),
+    ...linesAround(counts.home, 2).map((l) => ({ label: `${p.home}: más de ${l.toLocaleString('es')}`, p: counts.overHome(l) })),
+    ...linesAround(counts.away, 2).map((l) => ({ label: `${p.away}: más de ${l.toLocaleString('es')}`, p: counts.overAway(l) })),
+  ] : []);
+
   const xgLine = (g: FormGame) => (g.xgf == null ? '' : `${g.xgf.toFixed(1)}–${g.xga?.toFixed(1)}`);
 </script>
 
@@ -74,16 +87,17 @@
   {#if data.error || !p}
     <p class="error">{data.error || 'Sin predicción'}</p>
   {:else}
-    <section class="hero card">
-      <div class="side home"><span class="faint">Local</span><h1>{p.home}</h1>
-        {#if p.ratings.home}<span class="muted">{p.ratings.home.rank}º en fuerza</span>{/if}</div>
-      <div class="xg num"><span>{p.lambda_home.toFixed(2)}</span><small>goles esperados</small><span>{p.lambda_away.toFixed(2)}</span></div>
-      <div class="side away"><span class="faint">Visitante</span><h1>{p.away}</h1>
-        {#if p.ratings.away}<span class="muted">{p.ratings.away.rank}º en fuerza</span>{/if}</div>
+    <section class="hero">
+      <div class="side home"><span class="label">Local{#if p.ratings.home} · {p.ratings.home.rank}º en fuerza{/if}</span>
+        <h1>{p.home}</h1></div>
+      <div class="xg"><span class="label">Goles esperados</span>
+        <span class="fig score"><span>{p.lambda_home.toFixed(2)}</span><i>–</i><span>{p.lambda_away.toFixed(2)}</span></span></div>
+      <div class="side away"><span class="label">Visitante{#if p.ratings.away} · {p.ratings.away.rank}º en fuerza{/if}</span>
+        <h1>{p.away}</h1></div>
       <div class="probs">
         <ProbBar home={p.p_home} draw={p.p_draw} away={p.p_away} />
-        <div class="fair num faint">
-          <span>1 · cuota justa {odds(p.p_home)}</span><span>X · {odds(p.p_draw)}</span><span>2 · {odds(p.p_away)}</span>
+        <div class="fair num">
+          <span>1 · cuota justa <b>{odds(p.p_home)}</b></span><span>X · <b>{odds(p.p_draw)}</b></span><span>2 · <b>{odds(p.p_away)}</b></span>
         </div>
       </div>
       {#if !p.known.home || !p.known.away}
@@ -140,6 +154,38 @@
         </div>
       </section>
     </div>
+
+    {#if p.props && counts}
+      <section class="card gap">
+        <h2>Córners y tiros a puerta <small>esperados por equipo y probabilidad de cada línea</small></h2>
+        <div class="toggles">
+          <div class="seg" role="group" aria-label="Estadística">
+            <button class:on={stat === 'corners'} onclick={() => (stat = 'corners')}>Córners</button>
+            <button class:on={stat === 'sot'} onclick={() => (stat = 'sot')}>Tiros a puerta</button>
+          </div>
+          <div class="seg" role="group" aria-label="Periodo">
+            {#each PERIODS as [key, label]}
+              <button class:on={period === key} onclick={() => (period = key)}>{label}</button>
+            {/each}
+          </div>
+        </div>
+        <div class="counts">
+          <div><span class="faint">{p.home}</span><b class="num">{counts.home.toFixed(1)}</b></div>
+          <div><span class="faint">Total</span><b class="num">{(counts.home + counts.away).toFixed(1)}</b></div>
+          <div><span class="faint">{p.away}</span><b class="num">{counts.away.toFixed(1)}</b></div>
+        </div>
+        <div class="mk">
+          {#each countRows as m}
+            <div class="mrow"><span>{m.label}</span><span class="bar"><i style="width: {m.p * 100}%"></i></span>
+              <b class="num">{pct(m.p)}</b><span class="faint num">{odds(m.p)}</span></div>
+          {/each}
+        </div>
+        <p class="note">{STAT_LABEL[stat][0].toUpperCase() + STAT_LABEL[stat].slice(1)} esperados a partir de los goles esperados y de
+          lo que genera y concede cada equipo en {STAT_LABEL[stat]}. Medido sin mirar el futuro en 18.000 partidos: la probabilidad
+          de cada línea se aparta menos de 3 puntos de lo que pasó.
+          {#if period !== 'match'}Las mitades reparten el partido como se reparten los goles ({pct(p.props.first_half)} en la primera): no hay datos de {STAT_LABEL[stat]} por mitad para medirlo.{/if}</p>
+      </section>
+    {/if}
 
     <div class="grid grid-2 gap">
       {#each [{ side: 'home', team: p.home, games: p.form.home }, { side: 'away', team: p.away, games: p.form.away }] as t}
@@ -208,18 +254,27 @@
 <style>
   .market { margin-bottom: 16px; }
   .moves { margin-top: 14px; }
-  .pickers { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; padding: 12px; }
+  .pickers { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 28px; padding: 10px; }
   select { background: var(--bg3); color: var(--text); border: 1px solid var(--border2); border-radius: 8px; padding: 8px 10px; }
-  .hero { display: grid; grid-template-columns: 1fr auto 1fr; gap: 16px; align-items: center; margin-bottom: 16px; }
-  .hero h1 { font-size: 26px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.2; }
-  .side { display: grid; }
+  /* Marcador de retransmisión: cada equipo con un filete de su color de la barra 1X2. */
+  .hero { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 20px 24px; align-items: end; margin-bottom: 28px; }
+  .hero h1 { font-family: var(--display); font-weight: 900; text-transform: uppercase; font-size: clamp(34px, 5.4vw, 64px); line-height: .9; letter-spacing: .005em; overflow-wrap: anywhere; }
+  .side { display: grid; gap: 8px; padding-bottom: 10px; border-bottom: 3px solid var(--c); }
+  .side.home { --c: var(--home); }
+  .side.away { --c: var(--away); }
+  .score { display: flex; align-items: baseline; gap: 10px; font-size: clamp(40px, 6vw, 72px); }
+  .score i { font-style: normal; color: var(--text3); font-weight: 600; }
   .side.away { text-align: right; }
-  .xg { display: flex; align-items: baseline; gap: 10px; font-size: 22px; font-weight: 800; }
-  .xg small { font-size: 11px; color: var(--text3); font-weight: 600; }
-  .probs { grid-column: 1 / -1; display: grid; gap: 6px; }
-  .fair { display: flex; justify-content: space-between; font-size: 12px; }
-  .warn { grid-column: 1 / -1; color: var(--amber); }
-  @media (max-width: 640px) { .hero { grid-template-columns: 1fr 1fr; } .xg { grid-column: 1 / -1; grid-row: 2; justify-content: center; } }
+  .xg { display: grid; justify-items: center; gap: 8px; padding-bottom: 13px; }
+  .probs { grid-column: 1 / -1; display: grid; gap: 8px; }
+  .fair { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--text3); }
+  .fair b { color: var(--text2); font-weight: 600; }
+  .warn { grid-column: 1 / -1; color: var(--warn); }
+  @media (max-width: 640px) {
+    .hero { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    .xg { grid-column: 1 / -1; grid-row: 2; padding-bottom: 0; }
+    .hero h1 { font-size: 32px; }
+  }
   .gap { margin-top: 16px; }
   .tops { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
   .mk { display: grid; gap: 10px; }
@@ -236,5 +291,12 @@
   .steppers b { min-width: 16px; text-align: center; font-size: 18px; }
   .h2h { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
   .foot { margin-top: 20px; }
+  .toggles { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+  .seg { display: inline-flex; border: 1px solid var(--border2); border-radius: 8px; overflow: hidden; }
+  .seg button { background: none; border: 0; color: var(--text2); padding: 6px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+  .seg button.on { background: var(--bg4); color: var(--text); font-weight: 700; }
+  .counts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px; text-align: center; }
+  .counts div { display: grid; gap: 2px; font-size: 12px; }
+  .counts b { font-size: 22px; font-weight: 800; }
   .foot a { text-decoration: underline; }
 </style>

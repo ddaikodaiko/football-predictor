@@ -374,7 +374,9 @@ def main() -> int:
     current = season_code(date.today())
     for league in args.leagues.split(","):
         for season in seasons_from(args.first):
-            r = ingest_season(conn, league, season, season == current, args.refresh, not args.no_understat)
+            # --refresh forces only the current season: past seasons never change.
+            is_current = season == current
+            r = ingest_season(conn, league, season, is_current, args.refresh and is_current, not args.no_understat)
             if r["matches"]:
                 xg = f"  xG {r['xg']}/{r['matches']}" if r["xg"] else ""
                 print(f"{league:4s} {season}  {r['matches']:4d} partidos{xg}  {r['note']}", flush=True)

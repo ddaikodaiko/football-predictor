@@ -24,18 +24,20 @@
   <div class="page-head">
     <div>
       <h1>Próximos partidos</h1>
-      <p>Probabilidades del modelo para la próxima jornada de las cinco grandes ligas. Pulsa un partido para ver el detalle y simularlo.</p>
+      <p>Probabilidades del modelo para la próxima jornada de las cinco grandes ligas. Pulsa un partido para ver
+        marcadores, mercados y el simulador.</p>
     </div>
   </div>
 
   {#if surest.length}
-    <section class="grid grid-3 highlights">
+    <section class="board" aria-label="Los pronósticos más seguros de la jornada">
       {#each surest as m}
-        <a class="card hl" href={matchHref(m.league, m.home, m.away)}>
-          <span class="faint">{byCode[m.league]?.flag} {shortDate(m.date)}</span>
-          <strong>{m.home} – {m.away}</strong>
-          <span class="big num">{pct(m.top)}</span>
-          <span class="muted">{m.top === m.p_home ? `gana ${m.home}` : m.top === m.p_away ? `gana ${m.away}` : 'empate'}</span>
+        {@const side = m.top === m.p_home ? 'home' : m.top === m.p_away ? 'away' : 'draw'}
+        <a class="pick" href={matchHref(m.league, m.home, m.away)}>
+          <span class="label">{byCode[m.league]?.flag} {byCode[m.league]?.name} · {shortDate(m.date)}</span>
+          <span class="fig big" style="color: var(--{side})">{pct(m.top)}</span>
+          <span class="what">{side === 'home' ? `gana ${m.home}` : side === 'away' ? `gana ${m.away}` : 'empate'}</span>
+          <span class="vs faint">{m.home} – {m.away}</span>
         </a>
       {/each}
     </section>
@@ -54,7 +56,7 @@
       <div class="rows">
         {#each g.matches as m}
           <a class="row" href={matchHref(g.code, m.home, m.away)}>
-            <span class="date faint">{shortDate(m.date)}</span>
+            <span class="date label">{shortDate(m.date)}</span>
             <span class="teams"><b>{m.home}</b> <span class="faint">vs</span> <b>{m.away}</b></span>
             <span class="xg faint num" title="Goles esperados">{m.lambda_home.toFixed(1)} – {m.lambda_away.toFixed(1)}</span>
             <span class="bar"><ProbBar home={m.p_home} draw={m.p_draw} away={m.p_away} compact /></span>
@@ -70,22 +72,34 @@
 </div>
 
 <style>
-  .highlights { margin-bottom: 20px; }
-  .hl { display: grid; gap: 2px; transition: border-color .15s; }
-  .hl:hover { border-color: var(--border2); }
-  .big { font-size: 30px; font-weight: 800; color: var(--accent); line-height: 1.2; margin-top: 6px; }
+  /* Marcador: los tres pronósticos más seguros, separados por filetes y sin cajas. */
+  .board { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 36px; border-block: 1px solid var(--border2); }
+  .pick { display: grid; gap: 4px; padding: 20px 20px 22px; min-width: 0; transition: background .15s; }
+  .pick + .pick { border-left: 1px solid var(--border); }
+  .pick:hover { background: var(--bg2); }
+  .big { font-size: clamp(64px, 9vw, 104px); margin: 6px 0 2px; }
+  .what { font-weight: 600; font-size: 15px; }
+  .vs { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @media (max-width: 720px) {
+    .board { grid-template-columns: minmax(0, 1fr); }
+    .pick { grid-template-columns: auto minmax(0, 1fr); column-gap: 16px; padding: 14px 4px; }
+    .pick + .pick { border-left: 0; border-top: 1px solid var(--border); }
+    .pick .label { grid-column: 1 / -1; }
+    .big { grid-row: span 2; font-size: 56px; margin: 0; }
+    .what { align-self: end; }
+  }
   .league { margin-bottom: 16px; }
   .league h2 a:hover { color: var(--text); }
   .rows { display: grid; }
-  .row { display: grid; grid-template-columns: 90px minmax(0, 1fr) 70px minmax(0, 260px); align-items: center; gap: 12px; padding: 9px 6px; border-radius: 8px; }
+  .row { display: grid; grid-template-columns: 90px minmax(0, 1fr) 70px minmax(0, 280px); align-items: center; gap: 12px; padding: 10px 8px; border-radius: 4px; }
   .row:hover { background: var(--bg3); }
   .teams { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .xg { text-align: center; font-size: 12px; }
+  .xg { text-align: center; font-family: var(--mono); font-size: 11.5px; }
   @media (max-width: 720px) {
     .row { grid-template-columns: 1fr; gap: 4px; }
     .xg { display: none; }
   }
   .legend { margin-top: 12px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-  .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-left: 6px; }
+  .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-left: 6px; }
   .sw.h { background: var(--home); } .sw.d { background: var(--draw); } .sw.a { background: var(--away); }
 </style>

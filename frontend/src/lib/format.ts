@@ -21,8 +21,11 @@ export function dateWithYear(iso: string): string {
 
 export const seasonLabel = (code: string): string => `20${code.slice(0, 2)}/${code.slice(2)}`;
 
-/** Colour ramp for heatmaps: transparent -> accent, by share of the max. */
-export function heat(value: number, max: number, rgb = '0,201,107'): string {
+/** Inline style for a heat-map cell: the tone's colour at an opacity that grows with the
+ *  value, and dark ink once the cell is bright enough that light text stops reading. */
+export type Tone = 'accent' | 'good' | 'bad' | 'home' | 'away' | 'draw';
+export function heat(value: number, max: number, tone: Tone = 'accent'): string {
   const a = max > 0 ? Math.min(value / max, 1) : 0;
-  return `rgba(${rgb},${(0.06 + a * 0.84).toFixed(3)})`;
+  const alpha = 0.06 + a * 0.84;
+  return `background: rgba(var(--${tone}-rgb), ${alpha.toFixed(3)}); color: ${alpha > 0.55 ? 'var(--bg)' : 'var(--text)'}`;
 }

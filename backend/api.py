@@ -144,6 +144,12 @@ def backtest():
     return _engine().backtest
 
 
+@app.get("/api/track")
+def track():
+    """Predictions stored before each match, scored against the result and the market."""
+    return _engine().track()
+
+
 @app.get("/api/value")
 def value(min_ev: float = Query(0.02, ge=0, le=0.5)):
     return _engine().value(min_ev)

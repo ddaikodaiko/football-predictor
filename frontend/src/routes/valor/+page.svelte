@@ -58,7 +58,7 @@
           {#if s}
             <div class="clv">
               <span class="muted">{label}</span>
-              <b class="num" style="color: {s.ev_close > 0 ? 'var(--green)' : 'var(--red)'}">{pct(s.ev_close, 1)}</b>
+              <b class="num" style="color: {s.ev_close > 0 ? 'var(--good)' : 'var(--bad)'}">{pct(s.ev_close, 1)}</b>
               <span class="faint num">n = {s.n} · t = {s.t.toFixed(1)} · baten el cierre {pct(s.beat_close)}</span>
             </div>
           {/if}

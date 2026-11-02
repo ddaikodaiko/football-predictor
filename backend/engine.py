@@ -13,17 +13,22 @@ from functools import cached_property
 import numpy as np
 import pandas as pd
 
+import market
 import odds_live
+import props
 import store
-from backtest import COMPANION, OUT_DIR as BACKTEST_DIR, market_probs, outcome_index, report, scores
+from backtest import (COMPANION, OUT_DIR as BACKTEST_DIR, PRODUCTION_FILE as BACKTEST_FILE, REFERENCE_FILE,
+                      market_probs, outcome_index, report, scores)
 from ingest import LEAGUES, UNDERSTAT_LEAGUES, season_code
 from ratings import DixonColes, markets, outcome_probs, score_matrix
 from simulate import (GOAL_INTENSITY, ZONES, ZONE_LABELS, DEFAULT_ZONES, betting_backtest, simulate_season,
                       simulate_timeline, standings)
 
-MODEL_VERSION = "dc-xg0.5-xi0.003-joint-xgscaled"
-XG_WEIGHT = 0.5
-BACKTEST_FILE = "dc_joint_rescaled.csv.gz"
+MODEL_VERSION = "dc-market-mxi0.03-sd10-joint"
+# Ratings fitted on what the market priced each past match (market.py), with a ~3-week
+# half-life and an almost free prior. Backtest: 0.9705 log loss against 0.9785 for the
+# goals + xG fit it replaces, and goals or xG on top add nothing (ROADMAP.md).
+MODEL = {"xg_weight": 0.0, "market_weight": 1.0, "market_xi": 0.03, "prior_sd": 10.0}
 FLAGS = {"E": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "SP": "🇪🇸", "D": "🇩🇪", "I": "🇮🇹", "F": "🇫🇷", "N": "🇳🇱", "P": "🇵🇹"}
 
 
@@ -40,7 +45,7 @@ class Engine:
 
     def reload(self) -> None:
         """Re-read the store (after an ingest) and drop every cache."""
-        self.matches = store.load_matches(self.conn)
+        self.matches = market.add_market_lambdas(store.load_matches(self.conn))
         self.season = season_code(datetime.now(timezone.utc).date())
         self.all_fixtures = store.load_fixtures(self.conn, season=self.season)
         # Filtering 95k rows costs ~20 ms and pages ask for it hundreds of times: split once.
@@ -48,6 +53,8 @@ class Engine:
         self._teams: dict[str, list[str]] = {}
         self._value_cache: dict = {}
         self._models: dict[str, DixonColes] = {}
+        self._count_models: dict[tuple[str, str], DixonColes] = {}
+        self.props_weights = props.load_weights()
         self._forecasts: dict[tuple[str, int], dict] = {}
         self.__dict__.pop("backtest", None)
 
@@ -93,13 +100,31 @@ class Engine:
 
     def model(self, league: str) -> DixonColes:
         if league not in self._models:
-            # First divisions are fitted with their second (measured in backtest.py --joint:
-            # 0.9786 vs 0.9793 log loss), so promoted teams arrive with a real rating.
+            # First divisions are fitted with their second (backtest.py --joint), so promoted
+            # teams arrive with a real rating.
             fit_on = self._league(league)
             if league in COMPANION:
                 fit_on = self.matches[self.matches["league"].isin([league, COMPANION[league]])]
-            self._models[league] = DixonColes(xg_weight=XG_WEIGHT).fit(fit_on, primary=league)
+            self._models[league] = DixonColes(**MODEL).fit(fit_on, primary=league)
         return self._models[league]
+
+    def count_model(self, league: str, stat: str) -> DixonColes:
+        """Ratings on corners or shots on target (see props.py)."""
+        if (league, stat) not in self._count_models:
+            self._count_models[league, stat] = props.count_model(self._league(league), stat)
+        return self._count_models[league, stat]
+
+    def props(self, league: str, home: str, away: str, lambdas: tuple[float, float]) -> dict | None:
+        """Expected corners and shots on target per team. None until props.py has fitted
+        the weights, or in a league without those counts."""
+        if self.props_weights is None:
+            return None
+        try:
+            ratings = {s: self.count_model(league, s).lambdas(home, away) for s in props.STATS}
+        except ValueError:
+            return None
+        first = float(GOAL_INTENSITY[:3].sum() / GOAL_INTENSITY.sum())
+        return {**_round(props.predict(self.props_weights, lambdas, ratings)), "first_half": round(first, 4)}
 
     def current(self, league: str) -> pd.DataFrame:
         lg = self._league(league)
@@ -172,6 +197,7 @@ class Engine:
             "ratings": {"home": side(home), "away": side(away)},
             "form": {"home": self.form(league, home), "away": self.form(league, away)},
             "h2h": self.h2h(league, home, away),
+            "props": self.props(league, home, away, (lh, la)),
         }
 
     def inplay(self, league: str, home: str, away: str, score_home: int, score_away: int, minute: int) -> dict:
@@ -312,6 +338,45 @@ class Engine:
         return _round({"n": len(scored), "all": summary(scored), "final": summary(final),
                        "picks": scored.sort_values("kickoff", ascending=False).head(100).to_dict(orient="records")})
 
+    def track(self) -> dict:
+        """The model measured live: the last prediction stored before each match day
+        (upcoming() stores them), scored once the result is in, next to the bookmakers'
+        price for the same match. Unlike the backtest, nobody can redo these afterwards."""
+        pred = pd.read_sql_query("SELECT * FROM predictions", self.conn)
+        # Made on an earlier day than the match: kick-off times aren't stored, so a
+        # prediction from the match day itself might have been made after the start.
+        pred = pred[pred["created_at"].str[:10] < pred["date"]]
+        pred = pred.sort_values("created_at").drop_duplicates(["league", "date", "home", "away"], keep="last")
+        odds = [c for c in self.matches.columns if c.split("_")[0] in {"b365", "avg", "pin", "close"}]
+        played = self.matches[["league", "date", "home", "away", "fthg", "ftag", *odds]].assign(
+            date=self.matches["date"].dt.strftime("%Y-%m-%d"))
+        j = pred.merge(played, on=["league", "date", "home", "away"]).dropna(subset=["fthg", "ftag"])
+        if j.empty:
+            return {"n": 0, "by_version": [], "matches": []}
+        y = outcome_index(j)
+        model_p = j[["p_home", "p_draw", "p_away"]].to_numpy()
+        market_p, _ = market_probs(j)
+        ok = ~np.isnan(market_p).any(axis=1)
+        j = j.assign(outcome=y, ll_model=-np.log(model_p[np.arange(len(j)), y]),
+                     ll_market=np.where(ok, -np.log(np.where(ok[:, None], market_p, 1.0)[np.arange(len(j)), y]), np.nan),
+                     m_home=market_p[:, 0], m_draw=market_p[:, 1], m_away=market_p[:, 2])
+        def summary(df: pd.DataFrame) -> dict:
+            # Standard error of the paired difference: with a few dozen matches, a gap of
+            # several hundredths either way is still luck.
+            diff = df["ll_model"] - df["ll_market"]
+            return {"n": len(df), "model": float(df["ll_model"].mean()), "market": float(df["ll_market"].mean()),
+                    "diff_se": float(diff.std(ddof=1) / np.sqrt(len(df))) if len(df) > 1 else None,
+                    "from": df["date"].min(), "to": df["date"].max()}
+
+        cols = ["date", "league", "home", "away", "fthg", "ftag", "outcome", "p_home", "p_draw", "p_away",
+                "m_home", "m_draw", "m_away", "ll_model", "ll_market", "model_version", "created_at"]
+        return _round({
+            **summary(j[ok]), "n_all": len(j),
+            "by_version": [{"version": v, **summary(g)} for v, g in j[ok].groupby("model_version")],
+            "matches": j.sort_values(["date", "league", "home"], ascending=[False, True, True])[cols]
+                        .to_dict(orient="records"),
+        })
+
     # ── backtest ───────────────────────────────────────────────────────────────
 
     @cached_property
@@ -320,7 +385,7 @@ class Engine:
         cached next to the predictions and rebuilt only when they change."""
         path = BACKTEST_DIR / BACKTEST_FILE
         if not path.exists():
-            return {"available": False, "how": "python backtest.py --xg 0.5"}
+            return {"available": False, "how": "python backtest.py --joint --xg 0 --market 1 --market-xi 0.03 --prior 10 --name dc_market"}
         cache = path.with_suffix(".summary.json")
         if cache.exists() and cache.stat().st_mtime >= path.stat().st_mtime:
             return json.loads(cache.read_text())
@@ -359,6 +424,16 @@ class Engine:
                             "clv_positive": r.get("clv_positive"), "curve": curve})
         everything = betting_backtest(pred, edge=-1.0)
 
+        # The goals + xG model, scored on the same matches: how much the prices add.
+        reference = None
+        if (BACKTEST_DIR / REFERENCE_FILE).exists():
+            ref = pd.read_csv(BACKTEST_DIR / REFERENCE_FILE, parse_dates=["date"], dtype={"season": str})
+            ref = pred[["date", "home", "away"]].merge(ref, on=["date", "home", "away"], how="left")
+            ref_p = ref[["p_home", "p_draw", "p_away"]].to_numpy()
+            both = ok & ~np.isnan(ref_p).any(axis=1)
+            if both.sum() == ok.sum():
+                reference = scores(ref_p[ok], y[ok])
+
         return _round({
             "available": True, "model": MODEL_VERSION, "matches": int(ok.sum()),
             "from": pred["season"].min(), "to": pred["season"].max(),
@@ -369,6 +444,7 @@ class Engine:
             "reliability": reliability,
             "betting": betting,
             "bet_everything_roi": everything["roi"],
+            "reference": reference,
         })
 
 

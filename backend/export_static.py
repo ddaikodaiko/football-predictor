@@ -14,7 +14,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from engine import Engine, _round
+from engine import MODEL_VERSION, Engine, _round
 from ingest import LEAGUES
 
 OUT = Path(__file__).resolve().parent.parent / "frontend" / "static" / "data"
@@ -38,20 +38,27 @@ def league_bundle(e: Engine, code: str) -> dict:
     rank = {t: i + 1 for i, t in enumerate(ratings["team"])}
     pairs = {}
     h2h = {}
+    props, pp = {}, None
     for h in teams:
         for a in teams:
             if h == a:
                 continue
             pairs[f"{h}|{a}"] = [round(x, 4) for x in dc.lambdas(h, a)]
+            if (x := e.props(code, h, a, dc.lambdas(h, a))) is not None:
+                pp = x
+                props[f"{h}|{a}"] = [x["corners"]["home"], x["corners"]["away"], x["sot"]["home"], x["sot"]["away"]]
             games = e.h2h(code, h, a)
             if games and h < a:
                 h2h[f"{h}|{a}"] = games
     return {
-        "code": code, "teams": teams, "rho": round(dc.rho, 4), "fitted_on": dc.n_matches,
+        "code": code, "model": MODEL_VERSION, "teams": teams, "rho": round(dc.rho, 4), "fitted_on": dc.n_matches,
         "known": {t: dc.knows(t) for t in teams},
         "ratings": {r.team: {"attack": round(r.attack, 3), "defense": round(r.defense, 3),
                              "net": round(r.net, 3), "rank": rank[r.team]} for r in ratings.itertuples()},
         "pairs": pairs, "form": {t: e.form(code, t) for t in teams}, "h2h": h2h,
+        **({"props": {"first_half": pp["first_half"], "pairs": props,
+                      "alpha": {s: {"home": pp[s]["alpha_home"], "away": pp[s]["alpha_away"]} for s in ("corners", "sot")}}}
+           if pp else {}),
     }
 
 
@@ -72,10 +79,11 @@ def main() -> int:
         sizes[f"{code}/bundle.json"] = write(f"{code}/bundle.json", _round(league_bundle(e, code)))
         print(f"{code:4s} listo", flush=True)
     sizes["backtest.json"] = write("backtest.json", e.backtest)
+    sizes["track.json"] = write("track.json", e.track())
     # Live odds (value.json, clv.json) are NOT exported: The Odds API data is for personal
     # use, so the public demo leaves the Valor page to the local version.
     sizes["meta.json"] = write("meta.json", {"exported_at": datetime.now(timezone.utc).isoformat(timespec="minutes"),
-                                             "model": "dc-xg0.5-xi0.003-joint"})
+                                             "model": MODEL_VERSION})
     total = sum(sizes.values())
     print(f"\n{len(sizes)} ficheros, {total / 1e6:.1f} MB en {OUT}")
     return 0

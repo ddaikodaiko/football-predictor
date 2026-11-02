@@ -13,8 +13,9 @@
     : 0);
   const bars = $derived(b.available ? [
     { label: 'Sin modelo (frecuencias)', v: b.overall.base.log_loss, c: 'var(--text3)' },
+    ...(b.reference ? [{ label: 'Solo goles y xG', v: b.reference.log_loss, c: 'var(--text2)' }] : []),
     { label: 'Nuestro modelo', v: b.overall.model.log_loss, c: 'var(--accent)' },
-    { label: 'Pinnacle al cierre', v: b.overall.market.log_loss, c: 'var(--blue)' },
+    { label: 'Pinnacle al cierre', v: b.overall.market.log_loss, c: 'var(--market)' },
   ] : []);
   const lo = $derived(bars.length ? Math.min(...bars.map((x) => x.v)) - 0.02 : 0);
   const hi = $derived(bars.length ? Math.max(...bars.map((x) => x.v)) : 1);
@@ -52,9 +53,10 @@
               <b class="num">{x.v.toFixed(4)}</b></div>
           {/each}
         </div>
-        <p class="note">El log loss castiga dar poca probabilidad a lo que acaba pasando. El modelo se queda cerca del
-          mercado, pero <strong>no le gana</strong>. La diferencia es parecida en todas las ligas y en todas las épocas del año:
-          es información que el mercado tiene y el modelo no (bajas, alineaciones, fichajes).</p>
+        <p class="note">El log loss castiga dar poca probabilidad a lo que acaba pasando. El modelo aprende de los
+          <strong>precios de los partidos ya jugados</strong>, que saben de bajas, alineaciones y fichajes; con solo goles y
+          xG se quedaba más lejos. Aun así <strong>no le gana</strong> al cierre: lo que le falta es lo que se sabe la
+          semana del partido.</p>
       </section>
       <section class="card">
         <h2>Calibración <small>¿lo que dice que pasa el 30 %, pasa el 30 %?</small></h2>
@@ -69,7 +71,7 @@
       <LineChart labels={b.by_season.map((s) => seasonLabel(s.season))} yFormat={(v) => v.toFixed(3)}
         series={[
           { label: 'Modelo', color: 'var(--accent)', values: b.by_season.map((s) => s.model) },
-          { label: 'Pinnacle al cierre', color: 'var(--blue)', values: b.by_season.map((s) => s.market), dashed: true },
+          { label: 'Pinnacle al cierre', color: 'var(--market)', values: b.by_season.map((s) => s.market), dashed: true },
         ]} />
     </section>
 
@@ -94,7 +96,7 @@
         <div>
           {#if best}
             <LineChart zero labels={[]} yFormat={(v) => `${v.toFixed(0)} u`}
-              series={[{ label: `Banca apostando cuando el modelo ve más de un ${pct(best.edge)} de valor`, color: 'var(--red)', values: best.curve }]} />
+              series={[{ label: `Banca apostando cuando el modelo ve más de un ${pct(best.edge)} de valor`, color: 'var(--bad)', values: best.curve }]} />
           {/if}
         </div>
         <div>
@@ -103,13 +105,13 @@
             <tbody>
               {#each b.betting as r}
                 <tr><td>{pct(r.edge)}</td><td class="r">{r.bets.toLocaleString('es')}</td>
-                  <td class="r" style="color: var(--red)"><b>{pct(r.roi, 1)}</b></td><td class="r">{pct(r.clv_positive)}</td></tr>
+                  <td class="r" style="color: var(--bad)"><b>{pct(r.roi, 1)}</b></td><td class="r">{pct(r.clv_positive)}</td></tr>
               {/each}
             </tbody>
           </table>
           <p class="note">Apostar a <em>todo</em> pierde un {pct(-b.bet_everything_roi, 1)} (el margen de la casa); apostar con el
             modelo pierde <strong>más</strong>. Cuando el modelo y el mercado no están de acuerdo, casi siempre tiene razón el
-            mercado, y el modelo ve "valor" sobre todo en cuotas altas, justo donde más se pierde. Conclusión honesta:
+            mercado, y el "valor" que ve se carga hacia las cuotas altas, justo donde más se pierde. Conclusión honesta:
             <strong>este modelo sirve para entender partidos, no para ganar dinero.</strong></p>
         </div>
       </div>
@@ -118,12 +120,14 @@
     <section class="card gap how">
       <h2>Cómo funciona</h2>
       <ol class="note">
-        <li><strong>Datos</strong>: ~95.000 partidos de 12 ligas desde 2005 (football-data.co.uk) y xG por partido de las
-          cinco grandes desde 2014 (Understat).</li>
+        <li><strong>Datos</strong>: ~95.000 partidos de 12 ligas desde 2005 con sus cuotas (football-data.co.uk) y xG por
+          partido de las cinco grandes desde 2014 (Understat).</li>
+        <li><strong>Precios</strong>: la cuota de cada partido jugado se convierte en los goles que el mercado esperaba de
+          cada equipo. Un partido nunca ve su propia cuota: solo las de partidos anteriores.</li>
         <li><strong>Modelo</strong>: Dixon-Coles. Cada equipo tiene un ataque y una defensa; los goles de un partido son
           Poisson con esas fuerzas más la ventaja de jugar en casa, con una corrección para los marcadores bajos.</li>
-        <li><strong>Ajuste</strong>: máxima verosimilitud sobre los últimos tres años, pesando más lo reciente (vida media
-          de ~8 meses) y mezclando al 50 % goles y xG, que es menos ruidoso para medir lo bueno que es un equipo.</li>
+        <li><strong>Ajuste</strong>: máxima verosimilitud sobre esos goles esperados, pesando mucho lo reciente (vida media
+          de ~3 semanas: un precio caduca rápido). Sumar goles o xG ya no mejora el resultado.</li>
         <li><strong>Simulaciones</strong>: con las fuerzas se calcula la probabilidad de cada marcador, y con eso se juegan
           miles de veces los partidos que quedan de temporada.</li>
       </ol>

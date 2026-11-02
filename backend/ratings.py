@@ -35,6 +35,10 @@ MAX_GOALS = 10
 class DixonColes:
     xi: float = 0.003            # time decay per day (best of 0.001-0.005 in backtest.py)
     xg_weight: float = 0.0       # 0 = goals only, 1 = xG only
+    # Share of the target taken from what the market priced each past match (needs the
+    # mkt_home/mkt_away columns of market.add_market_lambdas). Goals get what's left.
+    market_weight: float = 0.0
+    market_xi: float | None = None   # time decay of the prices; None = same as xi
     prior_sd: float = 1.0        # ridge prior on attack/defense (log scale; best of 0.5-2)
     max_days: int = 3 * 365      # ignore matches older than this
     # Understat's xG drifts: 1.03 goals per xG in 2014/15, 0.90 in 2026/27. Mixed raw, it
@@ -90,20 +94,42 @@ class DixonColes:
         ai = df["away"].map(index).to_numpy()
         gh = df["fthg"].to_numpy(float)
         ga = df["ftag"].to_numpy(float)
-        th, ta = gh, ga
+        # Each match contributes one Poisson term per signal it has: goals always, xG and
+        # the market's price (market.py) where they exist, each with its share of the
+        # target and its own time decay (a price goes stale far sooner than a result).
+        # The Poisson log-likelihood is linear in the target, so the terms of a match add
+        # up to a single one: total weight `weight`, target the weighted mean `th`/`ta`.
+        time_w = np.exp(-self.xi * days)
+        mkt_w = np.exp(-(self.market_xi if self.market_xi is not None else self.xi) * days)
+        share_g = max(1.0 - self.xg_weight - self.market_weight, 0.0)
+        weight = np.full(len(df), share_g) * time_w
+        num_h, num_a = weight * gh, weight * ga
+        total_share = np.full(len(df), share_g)
         if self.xg_weight > 0 and "xg_home" in df:
             xh = pd.to_numeric(df["xg_home"], errors="coerce").to_numpy(float)
             xa = pd.to_numeric(df["xg_away"], errors="coerce").to_numpy(float)
             has = ~np.isnan(xh) & ~np.isnan(xa)
-            w = self.xg_weight
             if self.xg_rescale and has.any():
-                tw = np.exp(-self.xi * days)[has]
+                tw = time_w[has]
                 scale = (tw * (gh[has] + ga[has])).sum() / (tw * (xh[has] + xa[has])).sum()
                 xh, xa = xh * scale, xa * scale
                 self.xg_scale = float(scale)
-            th = np.where(has, w * xh + (1 - w) * gh, gh)
-            ta = np.where(has, w * xa + (1 - w) * ga, ga)
-        weight = np.exp(-self.xi * days)
+            w = np.where(has, self.xg_weight, 0.0) * time_w
+            num_h, num_a = num_h + w * np.nan_to_num(xh), num_a + w * np.nan_to_num(xa)
+            weight, total_share = weight + w, total_share + np.where(has, self.xg_weight, 0.0)
+        if self.market_weight > 0 and "mkt_home" in df:
+            mh, ma = df["mkt_home"].to_numpy(float), df["mkt_away"].to_numpy(float)
+            has = ~np.isnan(mh) & ~np.isnan(ma)
+            w = np.where(has, self.market_weight, 0.0) * mkt_w
+            num_h, num_a = num_h + w * np.nan_to_num(mh), num_a + w * np.nan_to_num(ma)
+            weight, total_share = weight + w, total_share + np.where(has, self.market_weight, 0.0)
+        # A match with none of the signals it was asked for (xG only, no xG) falls back to goals.
+        none = total_share == 0
+        weight = np.where(none, time_w, weight)
+        num_h, num_a = np.where(none, time_w * gh, num_h), np.where(none, time_w * ga, num_a)
+        total_share = np.where(none, 1.0, total_share)
+        th, ta = num_h / weight, num_a / weight
+        weight = weight / total_share
         n = len(self.teams)
         inv_var = 1.0 / self.prior_sd ** 2
         att0, dfn0 = np.zeros(n), np.zeros(n)
@@ -167,7 +193,7 @@ class DixonColes:
         la = np.exp(self.mu + mu_g + self.attack[ai] + self.defense[hi])
 
         def rho_nll(rho: float) -> float:
-            return -np.sum(weight * np.log(np.maximum(_tau(gh, ga, lh, la, rho), 1e-10)))
+            return -np.sum(time_w * np.log(np.maximum(_tau(gh, ga, lh, la, rho), 1e-10)))
 
         self.rho = float(minimize_scalar(rho_nll, bounds=(-0.25, 0.25), method="bounded").x)
         return self

@@ -12,8 +12,8 @@
 
 <style>
   .form { display: inline-flex; gap: 3px; }
-  .p { width: 18px; height: 18px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 800; color: #0c1018; }
-  .W { background: var(--green); }
+  .p { width: 18px; height: 18px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 800; color: var(--bg); }
+  .W { background: var(--good); }
   .D { background: var(--draw); }
-  .L { background: var(--red); }
+  .L { background: var(--bad); }
 </style>

@@ -26,7 +26,7 @@
   <text x={12} y={H / 2} text-anchor="middle" class="axis" transform="rotate(-90 12 {H / 2})">← Goles en contra esperados</text>
   {#each ratings as r}
     <g transform="translate({x(r.xgf)},{y(r.xga)})">
-      <circle r="5" class="dot" style="fill: hsl({Math.max(0, Math.min(120, 60 + r.net * 45))} 70% 50%)">
+      <circle r="5" class="dot" style="fill: color-mix(in oklab, var(--bad), var(--good) {Math.round(Math.max(0, Math.min(1, 0.5 + r.net * 0.375)) * 100)}%)">
         <title>{r.team}: {r.xgf.toFixed(2)} a favor, {r.xga.toFixed(2)} en contra</title>
       </circle>
       <text x="8" y="4" class="label">{r.team}</text>

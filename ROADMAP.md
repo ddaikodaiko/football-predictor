@@ -1,12 +1,12 @@
 # Roadmap
 
-## Estado (28-09-2026)
+## Estado (14-10-2026)
 
 | Fase | Qué | Estado |
 |------|-----|--------|
 | 1. Datos | SQLite local (`backend/store.py`) + ingesta (`backend/ingest.py`) | **hecho** |
-| 2. Modelo honesto | Dixon-Coles por máxima verosimilitud (`ratings.py`) + backtest walk-forward contra el mercado (`backtest.py`) | **hecho** |
-| 3. Simuladores | temporada, partido minuto a minuto y apuestas (`simulate.py`) | **hecho** (falta torneos) |
+| 2. Modelo honesto | Dixon-Coles por máxima verosimilitud (`ratings.py`) sobre los precios de los partidos ya jugados (`market.py`) + backtest walk-forward contra el mercado (`backtest.py`) | **hecho** |
+| 3. Simuladores | temporada, partido minuto a minuto, apuestas (`simulate.py`), córners y tiros (`props.py`) | **hecho** (falta torneos) |
 | 4. API | `api.py` + `engine.py` sobre la base local; arranca en ~2,5 s | **hecho** |
 | 5. UI | partidos, liga (pronóstico, clasificación, fuerzas), partido (simulador y directo), modelo, directo | **hecho** |
 | 6. Publicar | README con resultados hecho; faltan capturas y despliegue | pendiente |
@@ -23,6 +23,10 @@ emparejamiento de los propios partidos** (mismo día, mismo marcador): 100 % de 
 todas las temporadas probadas.
 
 ## Resultado del backtest (lo importante)
+
+> Desde el 14-10-2026 el modelo en producción aprende de los precios de los partidos ya
+> jugados: **0,9705**, el 92,6 % del camino (ver *Precios pasados como señal*). Lo de esta
+> sección es el modelo de goles y xG, que sigue siendo la referencia sin mercado.
 
 Walk-forward 2016/17-2025/26, 5 grandes ligas, 17.937 partidos. El modelo se reajusta cada
 semana solo con el pasado. Log loss, menos es mejor:
@@ -97,7 +101,8 @@ otra casa paga más):
 cuotas en tiempo real de muchas casas para comprar el mejor precio al momento, alineaciones y
 bajas antes que el mercado, y cuotas de apertura (las que se corrigen después). Con datos
 públicos, el techo realista es lo que hay: probabilidades al ~85 % del mercado y bien
-calibradas.
+calibradas. (El 14-10-2026 subió al 92,6 % aprendiendo de los precios de los partidos ya
+jugados: ver *Precios pasados como señal*.)
 
 ## Con cuentas (28-09-2026): The Odds API y API-Football
 
@@ -118,6 +123,85 @@ emparejadas (el resto, casi todo fichajes y canteranos). Resultado en 2024/25: l
 0,9782 → **0,9789** (peor) y ninguna ganancia frente al mercado. La lista de bajas
 anunciadas ya está en el precio: **no merece la pena pagar el plan de API-Football** para
 esto. Lo que podría servir es la alineación confirmada (1 h antes), que es otra cosa.
+
+## Precios pasados como señal (14-10-2026, `backend/market.py`)
+
+La diferencia con el mercado era información que el modelo no tenía: bajas, alineaciones,
+fichajes. Esa información está en los **precios de los partidos ya jugados**. Cada cuota
+(1X2 y más/menos 2,5, sin margen por el método de potencia) se convierte en los dos goles
+esperados que la reproducen con el mismo Dixon-Coles (mínimos cuadrados en una rejilla de
+700×700 λ; error mediano 0,16 % en ida y vuelta), y el ajuste aprende de ellos igual que de
+los goles y el xG. Un partido nunca ve su propia cuota: el ajuste solo usa partidos
+anteriores al corte (`tests/test_market.py` lo comprueba alterando el último precio).
+
+Walk-forward 2016/17-2025/26, cinco grandes, 17.937 partidos, log loss:
+
+| | log loss | RPS |
+|---|---|---|
+| Goles + xG (el modelo anterior) | 0,9785 | 0,1985 |
+| 25-50 % de precios dentro de ese ajuste | 0,9768-0,9770 | 0,1980 |
+| Solo precios, vida media ~10 semanas, prior σ = 1 | 0,9751 | — |
+| Solo precios, vida media ~3 semanas, prior σ = 2 | 0,9720 | — |
+| **Solo precios, vida media ~3 semanas (ξ = 0,03), prior σ = 10** | **0,9705** | **0,1961** |
+| Pinnacle, cuota de cierre | 0,9626 | 0,1937 |
+
+- Cubre el **92,6 %** de la distancia entre no saber nada y el cierre (antes, 85,1 %).
+  Mejora en las 10 temporadas y en las 5 ligas.
+- Lo que más pesaba era el **prior**: con un decaimiento rápido queda poco peso de datos y
+  el prior σ = 1 aplastaba los ratings. ξ entre 0,03 y 0,04 con σ ≥ 10 da 0,9704-0,9705;
+  ξ = 0,1 (vida media de una semana) empeora a 0,9737.
+- **Goles y xG ya no aportan**: mezclados en el ajuste empeoran, y una media logarítmica con
+  el modelo anterior (peso ajustado solo con temporadas pasadas) da 0,9744 contra 0,9743.
+  El precio de la semana pasada ya contiene lo que saben.
+- **Más/menos 2,5**: 0,6768 → **0,6721** (cierre: 0,6688). Invertir solo con el 1X2 da lo
+  mismo en 1X2 y peor en goles (0,6752), así que se usan los dos precios.
+- Contra la cuota media publicada días antes (17.079 partidos con las dos): modelo 0,9690,
+  media previa 0,9638, cierre 0,9610. Lo que queda es lo que se sabe la semana del partido.
+- **Sigue sin ganar dinero**: apostando con un 5 % de valor a cuota media previa, ROI
+  −10,2 % (antes −12,8 %) y el 36 % de las apuestas bate el cierre (antes 32 %).
+- Probado y descartado: corregir el empate según lo igualado del partido. El modelo da pocos
+  empates en partidos igualados (28,2 % contra 29,3 % real) y demasiados en los
+  desequilibrados (14,9 % contra 13,7 %), pero corregirlo con temporadas pasadas mejora
+  0,0002 con el modelo anterior y nada con el nuevo.
+
+- **Abierto**: dos grandes cara a cara. Con los dos goles esperados por encima de 1,4 calibra
+  bien (737 partidos: modelo 3,18 goles, mercado 3,16, reales 3,20; el de goles y xG daba 3,22
+  contra 3,04). Por encima de 1,7 solo hay 21 partidos (modelo 3,63, mercado 3,53, reales 3,29):
+  pocos para corregir nada, pero un Madrid-Barça sale a 4,0 goles esperados, que parece alto.
+- **Límite conocido: diferencias exageradas en partidos muy desequilibrados.** Para casar una
+  cuota de 1,05 un Poisson necesita una diferencia de ~3 goles; en la realidad el que va
+  ganando levanta el pie. Con diferencia esperada > 2,5 (360 partidos) el modelo espera 2,90,
+  el cierre leído con el mismo Poisson 2,76 y la real fue 2,38; el favorito gana el 84,2 % y
+  el modelo dice 88,8 %. Comprimir la diferencia manteniendo el total empeora el log loss en
+  todo el rango probado (0,9705 → 0,9754), así que no se corrige. Efecto visible: la
+  simulación de temporada infla la diferencia de goles de los dominantes (Barça 2026/27, tras
+  8 de 8: +93 esperada, récord histórico; el modelo de goles y xG decía +76).
+
+Reproducir: `python backtest.py --joint --xg 0 --market 1 --market-xi 0.03 --prior 10 --name dc_market`
+(~2 min). Varias configuraciones se pueden lanzar en paralelo: el backtest usa un hilo de BLAS.
+
+## Córners y tiros a puerta (29-09-2026, `backend/props.py`)
+
+Walk-forward 2017/18-2025/26, cinco grandes, 17.935 partidos. Log loss binomial negativa por
+equipo y partido (menos es mejor):
+
+| | córners | tiros a puerta |
+|---|---|---|
+| Media de la liga | 2,3837 | 2,2724 |
+| Desde los goles esperados (modelo de goles y xG) | 2,3353 | 2,1840 |
+| Desde los goles esperados (modelo de precios, 14-10-2026) | 2,3320 | 2,1736 |
+| Ratings sobre los propios córners/tiros | 2,3318 | 2,1764 |
+| Combinado (modelo de goles y xG) | 2,3256 | 2,1737 |
+| **Combinado (modelo de precios)** | **2,3245** | **2,1688** |
+
+- Calibración del total (más de 8,5 / 9,5 / 10,5 córners; 7,5 / 8,5 / 9,5 tiros): desvío menor
+  de 3 puntos en todos los tramos con más de 1.000 partidos.
+- Prior de los ratings: 0,15-0,3 igual de buenos; 0,6 y 1,0 peores por menos de 0,001.
+- **Sin medir**: el reparto por mitades (se usa el de los goles, 45,8 % en la primera) y el
+  mercado (football-data no trae cuotas de córners; The Odds API sí, en `alternate_totals_corners`).
+- **Selecciones**: probado a mano con el España-Croacia del 29-09-2026 usando goles esperados
+  sacados de Pinnacle; la parte "desde los goles esperados" daba 10,7 córners contra la línea
+  de 9 de Pinnacle. Pasar de clubes a selecciones con un favorito tan claro sobreestima.
 
 ## Pendiente
 

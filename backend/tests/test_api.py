@@ -70,3 +70,27 @@ def test_forecast_and_simulators(client):
     assert inplay["p_home"] > 0.95
     t = client.post("/api/simulate/match", json={"league": "SP1", "home": "T00", "away": "T01", "seed": 3}).json()
     assert len(t["goals"]) == sum(t["score"])
+
+
+def test_track_scores_only_predictions_made_before_the_match(client):
+    import api
+    conn = api.engine.conn
+    first = conn.execute("SELECT date, home, away, fthg, ftag FROM matches ORDER BY date LIMIT 2").fetchall()
+    conn.execute("UPDATE matches SET avg_h = 2.0, avg_d = 3.4, avg_a = 4.0")
+    rows = []
+    for k, (day, h, a, *_ ) in enumerate(first):
+        before = (pd.Timestamp(day) - pd.Timedelta(days=2)).isoformat()
+        rows.append((before, "v1", "SP1", day, h, a, 0.5, 0.3, 0.2))
+        rows.append(((pd.Timestamp(day) - pd.Timedelta(days=1)).isoformat(), "v2", "SP1", day, h, a, 0.6, 0.25, 0.15))
+    # Made on the match day itself: might be after kick-off, so it never counts.
+    day, h, a, *_ = first[0]
+    rows.append((pd.Timestamp(day).isoformat(), "v3", "SP1", day, h, a, 0.99, 0.005, 0.005))
+    conn.executemany("INSERT INTO predictions (created_at, model_version, league, date, home, away,"
+                     " p_home, p_draw, p_away) VALUES (?,?,?,?,?,?,?,?,?)", rows)
+    conn.commit()
+    api.engine.reload()
+    t = client.get("/api/track").json()
+    assert t["n"] == 2 and [v["version"] for v in t["by_version"]] == ["v2"]   # the latest before the day
+    import numpy as np
+    expected = np.mean([-np.log([0.6, 0.25, 0.15][0 if g > f else 1 if g == f else 2]) for _, _, _, g, f in first])
+    assert t["model"] == pytest.approx(expected, abs=1e-4)

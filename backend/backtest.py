@@ -16,17 +16,31 @@ replays these) and prints log loss / Brier / RPS per league.
 """
 
 import argparse
+import os
 import time
 from pathlib import Path
 
-import numpy as np
+# Before numpy: BLAS threads barely help on vectors of a few thousand matches, and they
+# make parallel runs fight over the cores. With one thread each, six configurations run
+# side by side in ~100 s.
+for _var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "FLEXIBLAS_NUM_THREADS"):
+    os.environ.setdefault(_var, "1")
+
+import numpy as np  # noqa: E402
 import pandas as pd
 
+import market
 import store
 from ingest import season_start_year
 from ratings import DixonColes, outcome_probs
 
 OUT_DIR = store.DATA_DIR / "backtest"
+# The run the app shows on "El modelo" and props.py reads expected goals from:
+#   python backtest.py --joint --xg 0 --market 1 --market-xi 0.03 --prior 10 --name dc_market
+PRODUCTION_FILE = "dc_market.csv.gz"
+# The goals + xG model it replaced, shown next to it as the reference without the market:
+#   python backtest.py --joint --xg 0.5 --name dc_joint_rescaled
+REFERENCE_FILE = "dc_joint_rescaled.csv.gz"
 OUTCOMES = ["H", "D", "A"]
 
 
@@ -150,6 +164,9 @@ def main() -> int:
     parser.add_argument("--from", dest="first", type=int, default=2016)
     parser.add_argument("--to", dest="last", type=int, default=2025, help="last season start year")
     parser.add_argument("--xg", default="0,0.5", help="xg_weight values to compare")
+    parser.add_argument("--market", default="0", help="market_weight values to compare (prices of past matches)")
+    parser.add_argument("--market-xi", default="", help="time decay of the prices, values to compare (default: --xi)")
+    parser.add_argument("--market-ou", type=float, default=1.0, help="weight of over/under prices when inverting them")
     parser.add_argument("--xi", type=float, default=0.003)
     parser.add_argument("--prior", type=float, default=1.0)
     parser.add_argument("--max-days", type=int, default=3 * 365)
@@ -162,22 +179,26 @@ def main() -> int:
     conn = store.connect()
     leagues = args.leagues.split(",")
     extra = [COMPANION[l] for l in leagues if args.joint and l in COMPANION]
-    matches = store.load_matches(conn, leagues + extra)
+    matches = market.add_market_lambdas(store.load_matches(conn, leagues + extra), args.market_ou)
     seasons = sorted({s for s in matches["season"] if args.first <= season_start_year(s) <= args.last})
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    for w in (float(x) for x in args.xg.split(",")):
+    market_xis = [float(v) for v in args.market_xi.split(",")] if args.market_xi else [None]
+    configs = [(float(x), float(m), mx) for x in args.xg.split(",") for m in args.market.split(",") for mx in market_xis]
+    for w, mw, mx in configs:
         name = f"dc_xg{w:g}_xi{args.xi:g}"
+        if mw:
+            name += f"_mkt{mw:g}" + (f"_mxi{mx:g}" if mx is not None else "")
         if args.prior != 1.0:
             name += f"_sd{args.prior:g}"
         if args.max_days != 3 * 365:
             name += f"_d{args.max_days}"
         if args.joint:
             name += "_joint"
-        name = args.name or name
+        name = args.name if args.name and len(configs) == 1 else (f"{args.name}_{name}" if args.name else name)
         t0 = time.time()
         pred = pd.concat([walk_forward(matches, lg, seasons, w, joint=args.joint, long_prior=args.long_prior, xi=args.xi,
                                        prior_sd=args.prior, max_days=args.max_days,
-                                       home_recent_days=args.home_recent)
+                                       home_recent_days=args.home_recent, market_weight=mw, market_xi=mx)
                           for lg in leagues], ignore_index=True)
         pred.to_csv(OUT_DIR / f"{name}.csv.gz", index=False)
         table = report(pred)

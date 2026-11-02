@@ -17,7 +17,7 @@
         <tr>
           <th>{i}</th>
           {#each row as p, j}
-            <td style="background: {heat(p, max, i > j ? '59,158,255' : i < j ? '245,166,35' : '160,168,190')}"
+            <td style={heat(p, max, i > j ? 'home' : i < j ? 'away' : 'draw')}
                 title="{home} {i}-{j} {away}: {(p * 100).toFixed(1)}%">
               {(p * 100).toFixed(p >= 0.1 ? 0 : 1)}
             </td>
@@ -34,5 +34,5 @@
   .axis-left { grid-row: 2; writing-mode: vertical-rl; transform: rotate(180deg); font-size: 11px; color: var(--text3); text-align: center; }
   table { border-collapse: separate; border-spacing: 3px; width: 100%; font-variant-numeric: tabular-nums; }
   th { font-size: 11px; color: var(--text3); font-weight: 700; }
-  td { text-align: center; font-size: 12px; font-weight: 600; padding: 8px 0; border-radius: 4px; color: var(--text); }
+  td { text-align: center; font-size: 12px; font-weight: 600; padding: 8px 0; border-radius: 3px; }
 </style>

@@ -13,7 +13,7 @@
 <style>
   .bar { display: flex; gap: 2px; height: 26px; border-radius: 6px; overflow: hidden; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
   .bar.compact { height: 18px; font-size: 10.5px; }
-  .seg { flex-basis: 0; display: flex; align-items: center; justify-content: center; min-width: 0; color: #0c1018; transition: flex-grow .4s ease; }
+  .seg { flex-basis: 0; display: flex; align-items: center; justify-content: center; min-width: 0; color: var(--bg); transition: flex-grow .4s ease; }
   .h { background: var(--home); }
   .d { background: var(--draw); }
   .a { background: var(--away); }

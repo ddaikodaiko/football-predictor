@@ -1,6 +1,7 @@
 import { env } from '$env/dynamic/public';
 import { base } from '$app/paths';
 import * as dcm from './dixoncoles';
+import type { PropsParams } from './props';
 
 const BASE = env.PUBLIC_API_URL ?? 'http://localhost:8000';
 /** Serverless demo: data from static JSON (backend/export_static.py), maths in the browser. */
@@ -54,6 +55,7 @@ export type Prediction = {
   ratings: { home: SideRating; away: SideRating };
   form: { home: FormGame[]; away: FormGame[] };
   h2h: { date: string; home: string; away: string; fthg: number; ftag: number }[];
+  props: PropsParams | null;
 };
 
 export type Inplay = {
@@ -75,6 +77,19 @@ export type Backtest = {
   reliability: { bin: string; n: number; predicted: number; observed: number }[];
   betting: { edge: number; bets: number; roi: number | null; profit: number | null; clv_positive: number | null; curve: number[] }[];
   bet_everything_roi: number;
+  /** the goals + xG model on the same matches: how much the prices add */
+  reference: Scores | null;
+};
+
+export type TrackSummary = { n: number; model: number; market: number; diff_se: number | null; from: string; to: string };
+export type Track = TrackSummary & {
+  n_all: number;
+  by_version: (TrackSummary & { version: string })[];
+  matches: {
+    date: string; league: string; home: string; away: string; fthg: number; ftag: number; outcome: 0 | 1 | 2;
+    p_home: number; p_draw: number; p_away: number; m_home: number | null; m_draw: number | null; m_away: number | null;
+    ll_model: number; ll_market: number | null; model_version: string; created_at: string;
+  }[];
 };
 
 export type ValuePick = {
@@ -118,9 +133,12 @@ async function post<T>(f: Fetch, path: string, body: unknown): Promise<T> {
 // ── static mode ──────────────────────────────────────────────────────────────
 
 type Bundle = {
-  code: string; teams: string[]; rho: number; fitted_on: number; known: Record<string, boolean>;
+  code: string; model?: string; teams: string[]; rho: number; fitted_on: number; known: Record<string, boolean>;
   ratings: Record<string, NonNullable<SideRating>>; pairs: Record<string, [number, number]>;
   form: Record<string, FormGame[]>; h2h: Record<string, Prediction['h2h']>;
+  // corners and shots on target: per pairing [corners home, corners away, sot home, sot away]
+  props?: { first_half: number; alpha: Record<'corners' | 'sot', { home: number; away: number }>;
+            pairs: Record<string, [number, number, number, number]> };
 };
 const bundles = new Map<string, Promise<Bundle>>();
 
@@ -147,13 +165,25 @@ async function staticPredict(league: string, home: string, away: string, f: Fetc
   const m = dcm.scoreMatrix(lh, la, b.rho);
   const key = home < away ? `${home}|${away}` : `${away}|${home}`;
   return {
-    league, home, away, model: 'dc-xg0.5-xi0.003-joint', fitted_on: b.fitted_on,
+    league, home, away, model: b.model ?? 'desconocido', fitted_on: b.fitted_on,
     known: { home: b.known[home] ?? false, away: b.known[away] ?? false },
     lambda_home: lh, lambda_away: la, ...dcm.markets(m),
     score_matrix: m.slice(0, 6).map((row) => row.slice(0, 6)),
     ratings: { home: b.ratings[home] ?? null, away: b.ratings[away] ?? null },
     form: { home: b.form[home] ?? [], away: b.form[away] ?? [] },
     h2h: b.h2h[key] ?? [],
+    props: staticProps(b, `${home}|${away}`),
+  };
+}
+
+function staticProps(b: Bundle, pair: string): PropsParams | null {
+  const v = b.props?.pairs[pair];
+  if (!b.props || !v) return null;
+  const { alpha, first_half } = b.props;
+  return {
+    corners: { home: v[0], away: v[1], alpha_home: alpha.corners.home, alpha_away: alpha.corners.away },
+    sot: { home: v[2], away: v[3], alpha_home: alpha.sot.home, alpha_away: alpha.sot.away },
+    first_half,
   };
 }
 
@@ -171,6 +201,7 @@ const live = {
   timeline: (league: string, home: string, away: string, seed?: number) =>
     post<Timeline>(fetch, '/api/simulate/match', { league, home, away, seed }),
   backtest: (f: Fetch = fetch) => get<Backtest>(f, '/api/backtest'),
+  track: (f: Fetch = fetch) => get<Track>(f, '/api/track'),
 };
 
 const offline: typeof live = {
@@ -190,6 +221,7 @@ const offline: typeof live = {
     return { home, away, ...dcm.timeline(lh, la, b.rho, seed) };
   },
   backtest: (f = fetch) => file<Backtest>(f, 'backtest.json'),
+  track: (f = fetch) => file<Track>(f, 'track.json'),
 };
 
 const core = STATIC ? offline : live;
