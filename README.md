@@ -13,6 +13,12 @@ las casas de apuestas.
 - **Simuladores**: la temporada que queda (10.000 veces en medio segundo), un partido minuto
   a minuto y las probabilidades en directo según el marcador.
 
+**Para quién:** quien quiera ver un modelo de probabilidades medido contra el mercado, con sus límites a la vista.
+
+**Stack:** Python (NumPy, SciPy, pandas) · FastAPI · SQLite · SvelteKit 2 + Svelte 5 · TypeScript.
+
+**Demo:** las capturas de abajo. La web también se compila como sitio estático para GitHub Pages (ver [Demo estática](#demo-estática-sin-servidor)), pero todavía no está publicada.
+
 | Partido | Pronóstico de temporada |
 |---|---|
 | ![Partido](docs/media/partido.jpg) | ![Liga](docs/media/liga.jpg) |
@@ -110,7 +116,7 @@ Marcadores en directo: clave gratuita de [football-data.org](https://www.footbal
 `backend/.env` como `FOOTBALL_DATA_KEY=...`. Actualizar datos: `python ingest.py --refresh`
 y `POST /api/reload`.
 
-Tests: `cd backend && ../.venv/bin/python -m pytest -q` (48 tests, sin red).
+Tests: `cd backend && ../.venv/bin/python -m pytest -q` (49 tests, sin red).
 
 ## API
 
